@@ -4,7 +4,7 @@ Provides SQLAlchemy ORM models and database operations for
 managing YouTube channel and video data in PostgreSQL.
 """
 
-from sqlalchemy import create_engine, Column, String, DateTime, Text, ForeignKey
+from sqlalchemy import create_engine, Column, String, DateTime, Text, ForeignKey, Float, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from youtube_analytics.config import DB_URL
@@ -47,6 +47,7 @@ class Channel(Base):
     profile_image = Column(String(500))
     banner_image = Column(String(500))
     fetched_at = Column(DateTime, default=datetime.utcnow)
+    last_searched_at = Column(DateTime)
     
     videos = relationship("Video", back_populates="channel", cascade="all, delete-orphan")
     
@@ -98,8 +99,18 @@ class Video(Base):
             "likes": self.likes,
             "comments": self.comments,
             "thumbnail": self.thumbnail,
-            "fetched_at": self.fetched_at
+            "fetched_at": self.fetched_at,
+            "last_searched_at": self.last_searched_at
         }
+
+
+class ChannelSetting(Base):
+    """Channel settings like RPM"""
+    __tablename__ = "channel_settings"
+
+    channel_id = Column(String(100), ForeignKey("channels.channel_id"), primary_key=True)
+    rpm = Column(Float, default=2.0)
+    updated_at = Column(DateTime, default=datetime.utcnow)
 
 
 class DatabaseManager:
@@ -125,6 +136,15 @@ class DatabaseManager:
             print(f"   Creating tables...")
             Base.metadata.create_all(self.engine)
             print("   Tables ready")
+
+            # Lightweight migration: add last_searched_at if missing
+            with self.engine.connect() as conn:
+                try:
+                    cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(channels)").fetchall()]
+                    if "last_searched_at" not in cols:
+                        conn.exec_driver_sql("ALTER TABLE channels ADD COLUMN last_searched_at DATETIME")
+                except Exception:
+                    pass
             
             self.Session = sessionmaker(bind=self.engine)
             print("Database initialized successfully\n")
@@ -147,6 +167,7 @@ class DatabaseManager:
             # Convert datetime strings to Python datetime objects
             if 'published_at' in filtered_data and filtered_data['published_at']:
                 filtered_data['published_at'] = parse_datetime(filtered_data['published_at'])
+            filtered_data['last_searched_at'] = datetime.utcnow()
             
             channel = session.query(Channel).filter_by(channel_id=channel_data["channel_id"]).first()
             
@@ -212,12 +233,23 @@ class DatabaseManager:
             return channel.to_dict() if channel else None
         finally:
             session.close()
+
+    def get_video(self, video_id):
+        """Get video by ID"""
+        session = self.Session()
+        try:
+            video = session.query(Video).filter_by(video_id=video_id).first()
+            return video.to_dict() if video else None
+        finally:
+            session.close()
     
     def get_all_channels(self):
         """Get all channels from database"""
         session = self.Session()
         try:
-            channels = session.query(Channel).all()
+            channels = session.query(Channel).order_by(
+                func.coalesce(Channel.last_searched_at, Channel.fetched_at).desc()
+            ).all()
             result = [channel.to_dict() for channel in channels]
             if result:
                 print(f"Retrieved {len(result)} channel(s) from database")
@@ -264,6 +296,38 @@ class DatabaseManager:
             return {"success": False, "error": str(e)}
         finally:
             session.close()
+
+    def get_all_videos(self):
+        """Get all videos from database"""
+        session = self.Session()
+        try:
+            videos = session.query(Video).all()
+            result = [video.to_dict() for video in videos]
+            if result:
+                print(f"Retrieved {len(result)} video(s) from database")
+            else:
+                print("No videos found in database")
+            return result
+        except Exception as e:
+            print(f"Error fetching videos: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return []
+        finally:
+            session.close()
+
+    def delete_video(self, video_id):
+        """Delete a video by ID"""
+        session = self.Session()
+        try:
+            session.query(Video).filter_by(video_id=video_id).delete()
+            session.commit()
+            return {"success": True, "message": "Video deleted"}
+        except Exception as e:
+            session.rollback()
+            return {"success": False, "error": str(e)}
+        finally:
+            session.close()
     
     def get_statistics(self, channel_id):
         """Get aggregated statistics for a channel"""
@@ -287,5 +351,33 @@ class DatabaseManager:
                 "avg_likes": total_likes // len(videos) if videos else 0,
                 "avg_comments": total_comments // len(videos) if videos else 0
             }
+        finally:
+            session.close()
+
+    def get_channel_rpm(self, channel_id):
+        """Get RPM setting for a channel"""
+        session = self.Session()
+        try:
+            setting = session.query(ChannelSetting).filter_by(channel_id=channel_id).first()
+            return setting.rpm if setting else None
+        finally:
+            session.close()
+
+    def set_channel_rpm(self, channel_id, rpm):
+        """Set RPM setting for a channel"""
+        session = self.Session()
+        try:
+            setting = session.query(ChannelSetting).filter_by(channel_id=channel_id).first()
+            if setting:
+                setting.rpm = rpm
+                setting.updated_at = datetime.utcnow()
+            else:
+                setting = ChannelSetting(channel_id=channel_id, rpm=rpm)
+                session.add(setting)
+            session.commit()
+            return {"success": True, "rpm": setting.rpm}
+        except Exception as e:
+            session.rollback()
+            return {"success": False, "error": str(e)}
         finally:
             session.close()

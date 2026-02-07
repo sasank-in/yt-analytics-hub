@@ -27,6 +27,9 @@ let videoBenchmarkChartInstance = null;
 let videoPercentileChartInstance = null;
 let videoChannelTrendChartInstance = null;
 let videoVelocityChartInstance = null;
+let videoEarningsChartInstance = null;
+let currentVideoAnalytics = null;
+
 
 const CHART_THEME = {
     text: '#1b2b3a',
@@ -76,6 +79,17 @@ function initializeEventListeners() {
         }
     }
 
+    const rpmInput = document.getElementById('video-rpm-input');
+    if (rpmInput) {
+        rpmInput.addEventListener('input', () => {
+            const rpm = Math.max(0, parseFloat(rpmInput.value || '0'));
+            if (currentVideoAnalytics) {
+                updateVideoEarningsChart(currentVideoAnalytics);
+            }
+            saveChannelRpm(rpm);
+        });
+    }
+
     // Quick Select Boxes
     const quickChannelSelect = document.getElementById('quick-channel-select');
     if (quickChannelSelect) {
@@ -114,6 +128,29 @@ function initializeEventListeners() {
     document.getElementById('fetch-videos-btn').addEventListener('click', handleFetchVideos);
     document.getElementById('clear-cache-btn').addEventListener('click', clearCache);
     document.getElementById('export-data-btn').addEventListener('click', exportData);
+    const deleteChannelBtn = document.getElementById('delete-channel-btn');
+    if (deleteChannelBtn) {
+        deleteChannelBtn.addEventListener('click', handleDeleteChannel);
+    }
+    const deleteVideoBtn = document.getElementById('delete-video-btn');
+    if (deleteVideoBtn) {
+        deleteVideoBtn.addEventListener('click', handleDeleteVideo);
+    }
+
+    const deleteChannelSelect = document.getElementById('delete-channel-select');
+    if (deleteChannelSelect) {
+        deleteChannelSelect.addEventListener('change', (e) => {
+            const input = document.getElementById('delete-channel-id');
+            if (input) input.value = e.target.value || '';
+        });
+    }
+    const deleteVideoSelect = document.getElementById('delete-video-select');
+    if (deleteVideoSelect) {
+        deleteVideoSelect.addEventListener('change', (e) => {
+            const input = document.getElementById('delete-video-id');
+            if (input) input.value = e.target.value || '';
+        });
+    }
 }
 
 // ==================== NAVIGATION ====================
@@ -146,7 +183,10 @@ function showSection(sectionId) {
             // Load saved channels by default
             switchChannelsView('search');
         }
-        if (sectionId === 'settings') checkAPIHealth();
+        if (sectionId === 'settings') {
+            checkAPIHealth();
+            loadSettingsData();
+        }
         if (sectionId === 'videos') {
             // Clear video results when switching to videos section
             document.getElementById('video-results').style.display = 'none';
@@ -474,6 +514,16 @@ async function handleChannelSearch() {
         return;
     }
 
+    const localMatch = findLocalChannel(query);
+    if (localMatch) {
+        currentChannelId = localMatch.channel_id;
+        await selectChannel(localMatch.channel_id);
+        showToast('Loaded from local database', 'success');
+        await loadDashboard();
+        document.getElementById('search-query').value = '';
+        return;
+    }
+
     showLoading(true, 'Searching for channel...');
 
     try {
@@ -491,6 +541,7 @@ async function handleChannelSearch() {
         // Auto-save to database
         currentChannelId = response.channel_id;
         showToast('Channel found and saved', 'success');
+        await loadDashboard();
         
         // Clear search input
         document.getElementById('search-query').value = '';
@@ -597,6 +648,8 @@ async function selectChannel(channelId) {
             const engagement = totalViews > 0 ? ((totalLikes + totalComments) / totalViews * 100) : 0;
             document.getElementById('channel-engagement').textContent = engagement.toFixed(2) + '%';
         }
+
+        await loadChannelRpm(channelId);
         
         // Load videos
         await loadChannelVideos(channelId);
@@ -742,6 +795,84 @@ async function exportData() {
     }
 }
 
+async function handleDeleteChannel() {
+    const input = document.getElementById('delete-channel-id');
+    const channelId = input ? input.value.trim() : '';
+    if (!channelId) {
+        showToast('Please enter a channel ID', 'error');
+        return;
+    }
+    if (!confirm('Delete this channel and all its videos from the database?')) return;
+    try {
+        await fetchAPI(`/channel/${channelId}`, { method: 'DELETE' });
+        showToast('Channel deleted', 'success');
+        if (input) input.value = '';
+        await loadSettingsData();
+        await loadDashboard();
+    } catch (error) {
+        showToast(`Error deleting channel: ${error.message}`, 'error');
+    }
+}
+
+async function handleDeleteVideo() {
+    const input = document.getElementById('delete-video-id');
+    const videoId = input ? input.value.trim() : '';
+    if (!videoId) {
+        showToast('Please enter a video ID', 'error');
+        return;
+    }
+    if (!confirm('Delete this video from the database?')) return;
+    try {
+        await fetchAPI(`/video/${videoId}`, { method: 'DELETE' });
+        showToast('Video deleted', 'success');
+        if (input) input.value = '';
+        await loadSettingsData();
+    } catch (error) {
+        showToast(`Error deleting video: ${error.message}`, 'error');
+    }
+}
+
+async function loadSettingsData() {
+    await Promise.all([populateDeleteChannels(), populateDeleteVideos()]);
+}
+
+async function populateDeleteChannels() {
+    const select = document.getElementById('delete-channel-select');
+    if (!select) return;
+    try {
+        const response = await fetchAPI('/channels');
+        const channels = response.channels || [];
+        select.innerHTML = '<option value=\"\">Choose a channel</option>';
+        channels.forEach(ch => {
+            const option = document.createElement('option');
+            option.value = ch.channel_id;
+            option.textContent = `${ch.title || 'Channel'} (${ch.channel_id})`;
+            select.appendChild(option);
+        });
+    } catch (error) {
+        // leave empty
+    }
+}
+
+async function populateDeleteVideos() {
+    const select = document.getElementById('delete-video-select');
+    if (!select) return;
+    try {
+        const response = await fetchAPI('/videos');
+        const videos = response.videos || [];
+        select.innerHTML = '<option value=\"\">Choose a video</option>';
+        videos.slice(0, 200).forEach(v => {
+            const option = document.createElement('option');
+            option.value = v.video_id;
+            const title = (v.title || 'Video').substring(0, 50);
+            option.textContent = `${title} (${v.video_id})`;
+            select.appendChild(option);
+        });
+    } catch (error) {
+        // leave empty
+    }
+}
+
 // ==================== API CALLS ====================
 
 async function fetchAPI(endpoint, options = {}) {
@@ -809,10 +940,32 @@ async function handleVideoSearch() {
 
     showLoading(true);
     try {
+        const cachedVideo = findLocalVideo(videoId);
+        if (cachedVideo) {
+            displayVideoAnalytics(cachedVideo);
+            addToSavedVideos(cachedVideo);
+            document.getElementById('video-results').style.display = 'block';
+            showToast('Loaded from local cache', 'success');
+            return;
+        }
+
+        const localVideo = await fetchVideoFromDb(videoId);
+        if (localVideo) {
+            displayVideoAnalytics(localVideo);
+            addToSavedVideos(localVideo);
+            document.getElementById('video-results').style.display = 'block';
+            showToast('Loaded from local database', 'success');
+            return;
+        }
+
         const response = await fetchAPI(`/video/search?q=${encodeURIComponent(videoId)}`);
         
         if (response && response.videos && response.videos.length > 0) {
             const video = response.videos[0];
+            if (video.channel_id) {
+                currentChannelId = video.channel_id;
+                await loadChannelRpm(currentChannelId);
+            }
             displayVideoAnalytics(video);
             addToSavedVideos(video);
             document.getElementById('video-results').style.display = 'block';
@@ -829,12 +982,40 @@ async function handleVideoSearch() {
     }
 }
 
+function findLocalChannel(query) {
+    if (!allChannels || allChannels.length === 0) return null;
+    const q = query.toLowerCase();
+    return allChannels.find(ch =>
+        (ch.title && ch.title.toLowerCase() === q) ||
+        (ch.custom_url && ch.custom_url.toLowerCase() === q) ||
+        (ch.channel_id && ch.channel_id.toLowerCase() === q)
+    ) || null;
+}
+
+async function fetchVideoFromDb(videoId) {
+    try {
+        const video = await fetchAPI(`/video/${encodeURIComponent(videoId)}`);
+        return video;
+    } catch (error) {
+        return null;
+    }
+}
+
+function findLocalVideo(videoId) {
+    if (!savedVideos || savedVideos.length === 0) return null;
+    const id = videoId.toLowerCase();
+    return savedVideos.find(v => (v.video_id || '').toLowerCase() === id) || null;
+}
+
 function displayVideoAnalytics(video) {
+    currentVideoAnalytics = video;
+    currentVideoAnalytics = video;
     // Show video statistics and chart sections
     document.getElementById('video-stats-section').style.display = 'block';
     document.getElementById('video-advanced-charts-section').style.display = 'grid';
     document.getElementById('video-insights-charts-section').style.display = 'grid';
     document.getElementById('video-trend-charts-section').style.display = 'grid';
+    document.getElementById('video-earnings-section').style.display = 'block';
     
     const views = toNumber(video.views);
     const likes = toNumber(video.likes);
@@ -867,6 +1048,7 @@ function displayVideoAnalytics(video) {
     drawVideoPercentileChart(document.getElementById('video-percentile-canvas'), data);
     drawVideoChannelTrendChart(document.getElementById('video-channel-trend-canvas'), video, currentChannelVideos);
     drawVideoVelocityChart(document.getElementById('video-velocity-canvas'), video);
+    updateVideoEarningsChart(video);
 }
 
 function drawVideoCompositionChart(canvas, data) {
@@ -955,6 +1137,7 @@ function drawVideoBenchmarkChart(canvas, data) {
             maintainAspectRatio: false,
             plugins: {
                 title: { display: true, text: 'Benchmark vs Saved Videos', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                subtitle: { display: true, text: 'Baseline: Median of saved videos', color: CHART_THEME.textMuted, font: { size: 11, weight: '500' }, padding: { bottom: 8 } },
                 legend: { position: 'bottom', labels: { color: CHART_THEME.textMuted, font: { size: 11, weight: '600' } } },
                 tooltip: {
                     enabled: true,
@@ -1006,6 +1189,8 @@ function drawEngagementChart(canvas, videos) {
 
     const ctx = canvas.getContext('2d');
     
+    const avgRate = engagements.reduce((s, e) => s + e.rate, 0) / (engagements.length || 1);
+
     engagementChartInstance = new Chart(ctx, {
         type: 'bar',
         data: {
@@ -1020,6 +1205,15 @@ function drawEngagementChart(canvas, videos) {
                 borderSkipped: false,
                 hoverBackgroundColor: CHART_THEME.brandBlue,
                 hoverBorderWidth: 2.5
+            }, {
+                label: 'Channel Average',
+                data: engagements.map(() => avgRate),
+                type: 'line',
+                borderColor: 'rgba(120, 130, 140, 0.9)',
+                borderDash: [6, 4],
+                borderWidth: 2,
+                pointRadius: 0,
+                fill: false
             }]
         },
         options: {
@@ -1028,7 +1222,8 @@ function drawEngagementChart(canvas, videos) {
             maintainAspectRatio: false,
             plugins: {
                 title: { display: true, text: 'Top Engagement Rates', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
-                legend: { display: false },
+                subtitle: { display: true, text: `Benchmark: Channel average • Sample size: ${engagements.length}`, color: CHART_THEME.textMuted, font: { size: 11, weight: '500' }, padding: { bottom: 8 } },
+                legend: { position: 'bottom', labels: { color: CHART_THEME.textMuted, font: { size: 11, weight: '600' } } },
                 tooltip: {
                     enabled: true,
                     backgroundColor: 'rgba(15, 23, 42, 0.95)',
@@ -1319,6 +1514,97 @@ function drawVideoVelocityChart(canvas, video) {
     });
 }
 
+function updateVideoEarningsChart(video) {
+    const canvas = document.getElementById('video-earnings-canvas');
+    if (!canvas || !canvas.getContext) return;
+
+    if (videoEarningsChartInstance) {
+        videoEarningsChartInstance.destroy();
+    }
+
+    const views = toNumber(video.views);
+    const rpmInput = document.getElementById('video-rpm-input');
+    const rpm = rpmInput ? Math.max(0, parseFloat(rpmInput.value || '0')) : 0;
+    const earnings = (views / 1000) * rpm;
+
+    const ctx = canvas.getContext('2d');
+    videoEarningsChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['Estimated Earnings (USD)'],
+            datasets: [{
+                label: 'Estimated Earnings',
+                data: [earnings],
+                backgroundColor: CHART_THEME.brandBlueLight,
+                borderColor: CHART_THEME.brandBlue,
+                borderWidth: 2,
+                borderRadius: 10,
+                borderSkipped: false
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'RPM-based Estimate', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                subtitle: { display: true, text: `RPM: $${rpm.toFixed(2)} per 1,000 views`, color: CHART_THEME.textMuted, font: { size: 11, weight: '500' }, padding: { bottom: 8 } },
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 14,
+                    titleFont: { size: 12, weight: '600' },
+                    bodyFont: { size: 12, weight: '500' },
+                    borderColor: CHART_THEME.border,
+                    borderWidth: 1,
+                    callbacks: {
+                        label: (c) => `$${c.parsed.y.toFixed(2)}`
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: CHART_THEME.grid, drawBorder: true, borderColor: CHART_THEME.border },
+                    ticks: { color: CHART_THEME.textMuted, font: { size: 12, weight: '500' }, callback: (v) => `$${v}`, padding: 10 }
+                },
+                x: {
+                    grid: { display: false, drawBorder: false },
+                    ticks: { color: CHART_THEME.text, font: { size: 12, weight: '600' }, padding: 10 }
+                }
+            }
+        }
+    });
+}
+
+async function loadChannelRpm(channelId) {
+    const rpmInput = document.getElementById('video-rpm-input');
+    if (!rpmInput || !channelId) return;
+
+    try {
+        const response = await fetchAPI(`/channel/${channelId}/rpm`);
+        const rpm = response.rpm;
+        rpmInput.value = (rpm !== null && rpm !== undefined) ? rpm : (rpmInput.value || 2.0);
+        if (currentVideoAnalytics) {
+            updateVideoEarningsChart(currentVideoAnalytics);
+        }
+    } catch (error) {
+        // Keep default RPM
+    }
+}
+
+async function saveChannelRpm(rpm) {
+    if (!currentChannelId) return;
+    try {
+        await fetchAPI(`/channel/${currentChannelId}/rpm`, {
+            method: 'PUT',
+            body: JSON.stringify({ rpm })
+        });
+    } catch (error) {
+        // Best-effort save
+    }
+}
+
 function getSavedBenchmarks() {
     if (!savedVideos || savedVideos.length === 0) {
         return { views: 0, likes: 0, comments: 0 };
@@ -1379,6 +1665,8 @@ function drawTopVideosChart(canvas, videos) {
 
     const ctx = canvas.getContext('2d');
     
+    const avgViews = topVideos.reduce((s, v) => s + v.views, 0) / (topVideos.length || 1);
+
     topVideosChartInstance = new Chart(ctx, {
         type: 'bar',
         data: {
@@ -1393,6 +1681,15 @@ function drawTopVideosChart(canvas, videos) {
                 borderSkipped: false,
                 hoverBackgroundColor: CHART_THEME.brandGreen,
                 hoverBorderWidth: 2.5
+            }, {
+                label: 'Average',
+                data: topVideos.map(() => avgViews),
+                type: 'line',
+                borderColor: 'rgba(120, 130, 140, 0.9)',
+                borderDash: [6, 4],
+                borderWidth: 2,
+                pointRadius: 0,
+                fill: false
             }]
         },
         options: {
@@ -1400,7 +1697,8 @@ function drawTopVideosChart(canvas, videos) {
             maintainAspectRatio: false,
             plugins: {
                 title: { display: true, text: 'Top Videos by Views', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
-                legend: { display: false },
+                subtitle: { display: true, text: `Benchmark: Average views • Sample size: ${topVideos.length}`, color: CHART_THEME.textMuted, font: { size: 11, weight: '500' }, padding: { bottom: 8 } },
+                legend: { position: 'bottom', labels: { color: CHART_THEME.textMuted, font: { size: 11, weight: '600' } } },
                 tooltip: {
                     enabled: true,
                     backgroundColor: 'rgba(15, 23, 42, 0.95)',
@@ -1450,6 +1748,8 @@ function drawCommentsChart(canvas, videos) {
 
     const ctx = canvas.getContext('2d');
 
+    const avgComments = topComments.reduce((s, v) => s + v.comments, 0) / (topComments.length || 1);
+
     commentsChartInstance = new Chart(ctx, {
         type: 'bar',
         data: {
@@ -1464,6 +1764,15 @@ function drawCommentsChart(canvas, videos) {
                 borderSkipped: false,
                 hoverBackgroundColor: CHART_THEME.brandGold,
                 hoverBorderWidth: 2.5
+            }, {
+                label: 'Average',
+                data: topComments.map(() => avgComments),
+                type: 'line',
+                borderColor: 'rgba(120, 130, 140, 0.9)',
+                borderDash: [6, 4],
+                borderWidth: 2,
+                pointRadius: 0,
+                fill: false
             }]
         },
         options: {
@@ -1471,7 +1780,8 @@ function drawCommentsChart(canvas, videos) {
             maintainAspectRatio: false,
             plugins: {
                 title: { display: true, text: 'Top Commented Videos', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
-                legend: { display: false },
+                subtitle: { display: true, text: `Benchmark: Average comments • Sample size: ${topComments.length}`, color: CHART_THEME.textMuted, font: { size: 11, weight: '500' }, padding: { bottom: 8 } },
+                legend: { position: 'bottom', labels: { color: CHART_THEME.textMuted, font: { size: 11, weight: '600' } } },
                 tooltip: {
                     enabled: true,
                     backgroundColor: 'rgba(15, 23, 42, 0.95)',
@@ -1526,6 +1836,8 @@ function drawViewsTrendChart(canvas, videos) {
 
     const ctx = canvas.getContext('2d');
 
+    const avgViews = data.reduce((s, v) => s + v, 0) / (data.length || 1);
+
     viewsTrendChartInstance = new Chart(ctx, {
         type: 'line',
         data: {
@@ -1539,6 +1851,13 @@ function drawViewsTrendChart(canvas, videos) {
                 tension: 0.35,
                 pointRadius: 3,
                 pointHoverRadius: 5
+            }, {
+                label: 'Average',
+                data: labels.map(() => avgViews),
+                borderColor: 'rgba(120, 130, 140, 0.9)',
+                borderDash: [6, 4],
+                fill: false,
+                pointRadius: 0
             }]
         },
         options: {
@@ -1546,7 +1865,8 @@ function drawViewsTrendChart(canvas, videos) {
             maintainAspectRatio: false,
             plugins: {
                 title: { display: true, text: 'Publishing Timeline (Views)', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
-                legend: { display: false },
+                subtitle: { display: true, text: `Benchmark: Average views • Sample size: ${data.length}`, color: CHART_THEME.textMuted, font: { size: 11, weight: '500' }, padding: { bottom: 8 } },
+                legend: { position: 'bottom', labels: { color: CHART_THEME.textMuted, font: { size: 11, weight: '600' } } },
                 tooltip: {
                     enabled: true,
                     backgroundColor: 'rgba(15, 23, 42, 0.95)',
@@ -1845,14 +2165,22 @@ function loadSavedVideos() {
 }
 
 function addToSavedVideos(videoData) {
-    // Check if video already exists
-    const exists = savedVideos.some(v => v.video_id === videoData.video_id);
-    if (!exists) {
-        savedVideos.push(videoData);
-        saveSavedVideos();
-        // Update quick select box
-        populateQuickVideoSelect(savedVideos);
+    if (!videoData) return;
+    const normalized = {
+        ...videoData,
+        video_id: videoData.video_id || videoData.id || videoData.videoId,
+        title: videoData.title || (videoData.snippet && videoData.snippet.title) || 'Video'
+    };
+    if (!normalized.video_id) return;
+
+    const index = savedVideos.findIndex(v => v.video_id === normalized.video_id);
+    if (index === -1) {
+        savedVideos.push(normalized);
+    } else {
+        savedVideos[index] = { ...savedVideos[index], ...normalized };
     }
+    saveSavedVideos();
+    populateQuickVideoSelect(savedVideos);
 }
 
 function loadSelectedSavedVideo() {

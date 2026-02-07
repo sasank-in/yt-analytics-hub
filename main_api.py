@@ -129,6 +129,18 @@ async def get_all_channels():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/videos")
+async def get_all_videos():
+    """Get all saved videos"""
+    try:
+        videos = db.get_all_videos()
+        return {"videos": videos, "count": len(videos)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/channel/{channel_id}")
 async def get_channel_details(channel_id: str):
     """Get detailed channel information"""
@@ -227,6 +239,20 @@ async def search_video_get(q: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/video/{video_id}")
+async def get_video_details(video_id: str):
+    """Get a video from the database by ID"""
+    try:
+        video = db.get_video(video_id)
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        return video
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/statistics/{channel_id}")
 async def get_statistics(channel_id: str):
     """Get statistics for a channel"""
@@ -242,12 +268,55 @@ async def get_statistics(channel_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/channel/{channel_id}/rpm")
+async def get_channel_rpm(channel_id: str):
+    """Get RPM setting for a channel"""
+    try:
+        rpm = db.get_channel_rpm(channel_id)
+        return {"channel_id": channel_id, "rpm": rpm}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/channel/{channel_id}/rpm")
+async def set_channel_rpm(channel_id: str, payload: dict):
+    """Set RPM setting for a channel"""
+    try:
+        rpm = float(payload.get("rpm", 0))
+        if rpm < 0:
+            raise HTTPException(status_code=400, detail="RPM must be >= 0")
+        result = db.set_channel_rpm(channel_id, rpm)
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+        return {"channel_id": channel_id, "rpm": result.get("rpm")}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/api/channel/{channel_id}")
 async def delete_channel(channel_id: str):
     """Delete a channel and its videos"""
     try:
         db.delete_channel(channel_id)
         return {"message": "Channel deleted successfully", "channel_id": channel_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/video/{video_id}")
+async def delete_video(video_id: str):
+    """Delete a video by ID"""
+    try:
+        result = db.delete_video(video_id)
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+        return {"message": "Video deleted successfully", "video_id": video_id}
     except HTTPException:
         raise
     except Exception as e:

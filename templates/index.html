@@ -267,6 +267,33 @@
                 </div>
 
                 <div class="card">
+                    <h3>Delete From Database</h3>
+                    <div class="form-group">
+                        <label for="delete-channel-select">Select Channel</label>
+                        <select id="delete-channel-select" class="select-field">
+                            <option value="">Choose a channel</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="delete-channel-id">Channel ID</label>
+                        <input type="text" id="delete-channel-id" class="input-field" placeholder="Enter channel ID">
+                    </div>
+                    <button id="delete-channel-btn" class="btn btn-danger">Delete Channel</button>
+
+                    <div class="form-group" style="margin-top: 1.5rem;">
+                        <label for="delete-video-select">Select Video</label>
+                        <select id="delete-video-select" class="select-field">
+                            <option value="">Choose a video</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-top: 1.5rem;">
+                        <label for="delete-video-id">Video ID</label>
+                        <input type="text" id="delete-video-id" class="input-field" placeholder="Enter video ID">
+                    </div>
+                    <button id="delete-video-btn" class="btn btn-danger">Delete Video</button>
+                </div>
+
+                <div class="card">
                     <h3>About</h3>
                     <p><strong>YouTube Analytics Pro</strong></p>
                     <p>Version: 2.0.0</p>
@@ -386,6 +413,17 @@
                         <div class="chart-container">
                             <canvas id="video-velocity-canvas"></canvas>
                         </div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top: 2rem; display: none;" id="video-earnings-section">
+                    <h3>Estimated Earnings (RPM-based)</h3>
+                    <div class="form-group" style="max-width: 260px;">
+                        <label for="video-rpm-input">RPM (USD per 1,000 views)</label>
+                        <input type="number" id="video-rpm-input" class="input-field" min="0" step="0.1" value="2.0">
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="video-earnings-canvas"></canvas>
                     </div>
                 </div>
             </section>
