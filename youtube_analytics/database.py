@@ -110,7 +110,7 @@ class DatabaseManager:
         try:
             from youtube_analytics.config import DB_ECHO, DB_URL as config_db_url
             
-            print(f"🗄️ Initializing database...")
+            print("Initializing database...")
             print(f"   URL: {config_db_url}")
             
             self.engine = create_engine(config_db_url, echo=DB_ECHO)
@@ -119,17 +119,17 @@ class DatabaseManager:
             print(f"   Testing connection...")
             with self.engine.connect() as conn:
                 pass
-            print(f"   ✅ Connection successful")
+            print("   Connection successful")
             
             # Create tables
             print(f"   Creating tables...")
             Base.metadata.create_all(self.engine)
-            print(f"   ✅ Tables ready")
+            print("   Tables ready")
             
             self.Session = sessionmaker(bind=self.engine)
-            print(f"✅ Database initialized successfully\n")
+            print("Database initialized successfully\n")
         except Exception as e:
-            print(f"\n❌ DATABASE INITIALIZATION FAILED")
+            print("\nDATABASE INITIALIZATION FAILED")
             print(f"   Error: {str(e)}")
             print(f"   URL: {config_db_url}")
             import traceback
@@ -161,11 +161,11 @@ class DatabaseManager:
             
             session.commit()
             session.refresh(channel)  # Refresh to get the updated timestamp
-            print(f"✅ Channel saved: {channel_data['title']}")
+            print(f"Channel saved: {channel_data['title']}")
             return {"success": True, "message": f"Channel '{channel_data['title']}' saved/updated"}
         except Exception as e:
             session.rollback()
-            print(f"❌ Channel save error: {str(e)} | Data keys: {list(channel_data.keys())}")
+            print(f"Channel save error: {str(e)} | Data keys: {list(channel_data.keys())}")
             return {"success": False, "error": str(e)}
         finally:
             session.close()
@@ -199,7 +199,7 @@ class DatabaseManager:
             return {"success": True, "message": f"Video '{video_data['title']}' saved/updated"}
         except Exception as e:
             session.rollback()
-            print(f"📹 Video save error: {str(e)} | Data: {video_data}")
+            print(f"Video save error: {str(e)} | Data: {video_data}")
             return {"success": False, "error": str(e)}
         finally:
             session.close()
@@ -220,12 +220,12 @@ class DatabaseManager:
             channels = session.query(Channel).all()
             result = [channel.to_dict() for channel in channels]
             if result:
-                print(f"📊 Retrieved {len(result)} channel(s) from database")
+                print(f"Retrieved {len(result)} channel(s) from database")
             else:
-                print(f"⚠️ No channels found in database")
+                print("No channels found in database")
             return result
         except Exception as e:
-            print(f"❌ Error fetching channels: {str(e)}")
+            print(f"Error fetching channels: {str(e)}")
             import traceback
             traceback.print_exc()
             return []
@@ -239,12 +239,12 @@ class DatabaseManager:
             videos = session.query(Video).filter_by(channel_id=channel_id).all()
             result = [video.to_dict() for video in videos]
             if result:
-                print(f"🎬 Retrieved {len(result)} video(s) for channel {channel_id}")
+                print(f"Retrieved {len(result)} video(s) for channel {channel_id}")
             else:
-                print(f"⚠️ No videos found for channel: {channel_id}")
+                print(f"No videos found for channel: {channel_id}")
             return result
         except Exception as e:
-            print(f"❌ Error fetching videos: {str(e)}")
+            print(f"Error fetching videos: {str(e)}")
             import traceback
             traceback.print_exc()
             return []

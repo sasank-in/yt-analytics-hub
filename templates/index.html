@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YouTube Analytics Pro</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
 </head>
 <body>
 <div class="app">
@@ -56,6 +57,47 @@
                         <p class="placeholder">No channels yet. Search for a channel to get started.</p>
                     </div>
                 </div>
+
+                <div class="grid-2col" style="margin-top: 20px;">
+                    <div class="card">
+                        <h3>Subscribers by Channel</h3>
+                        <div id="dashboard-subscribers-chart" class="chart-container">
+                            <canvas id="dashboard-subscribers-canvas"></canvas>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h3>Views Portfolio Mix</h3>
+                        <div id="dashboard-views-chart" class="chart-container">
+                            <canvas id="dashboard-views-canvas"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Executive Highlights</h3>
+                    <div id="dashboard-highlights" class="highlights-grid">
+                        <div class="highlight-item">
+                            <p class="highlight-label">Top Channel</p>
+                            <p class="highlight-value" id="highlight-top-channel">-</p>
+                            <p class="highlight-subtext" id="highlight-top-channel-metric">-</p>
+                        </div>
+                        <div class="highlight-item">
+                            <p class="highlight-label">Top Efficiency</p>
+                            <p class="highlight-value" id="highlight-top-engagement">-</p>
+                            <p class="highlight-subtext" id="highlight-top-engagement-metric">-</p>
+                        </div>
+                        <div class="highlight-item">
+                            <p class="highlight-label">Total Audience</p>
+                            <p class="highlight-value" id="highlight-total-audience">-</p>
+                            <p class="highlight-subtext">Subscribers tracked</p>
+                        </div>
+                        <div class="highlight-item">
+                            <p class="highlight-label">Avg Views/Video</p>
+                            <p class="highlight-value" id="highlight-avg-views">-</p>
+                            <p class="highlight-subtext">Across portfolio</p>
+                        </div>
+                    </div>
+                </div>
             </section>
 
             <!-- Channels Section (Search & Saved Combined) -->
@@ -66,37 +108,24 @@
                 </div>
 
                 <div class="card">
-                    <div class="view-toggle">
-                        <select id="channels-view-toggle" class="view-select">
-                            <option value="search">Search Channel</option>
-                            <option value="saved">Saved Channels</option>
-                        </select>
-                    </div>
-
                     <!-- Search View -->
                     <div id="search-view" class="search-form view-content active-view">
                         <div class="form-group">
-                            <label>Search Method</label>
-                            <div class="radio-group">
-                                <input type="radio" id="search-by-name" name="search_type" value="name" checked>
-                                <label for="search-by-name">Channel Name</label>
-                                <input type="radio" id="search-by-id" name="search_type" value="id">
-                                <label for="search-by-id">Channel ID</label>
+                            <label for="search-query">Search Channel</label>
+                            <div class="search-input-container">
+                                <input 
+                                    type="text" 
+                                    id="search-query" 
+                                    placeholder="Enter channel name or ID"
+                                    class="input-field"
+                                >
+                                <select id="quick-channel-select" class="quick-select-box" title="Quick select from recent/saved channels">
+                                    <option value="">Recent Channels</option>
+                                </select>
                             </div>
                         </div>
 
-                        <div class="form-group">
-                            <label for="search-query">Search Query</label>
-                            <input 
-                                type="text" 
-                                id="search-query" 
-                                placeholder="Enter channel name or ID"
-                                class="input-field"
-                            >
-                        </div>
-
                         <button id="search-btn" class="btn btn-primary">
-                            <span class="btn-icon">🔍</span>
                             Search Channel
                         </button>
 
@@ -155,31 +184,11 @@
                     <h3>Channel Videos</h3>
                     <div style="display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
                         <button id="fetch-videos-btn" class="btn btn-accent">
-                            <span class="btn-icon">📹</span>
                             Fetch Videos
                         </button>
-                        <div style="flex: 1; min-width: 250px;">
-                            <select id="channel-video-select" class="input-field" style="width: 100%;">
-                                <option value="">-- Select a video to analyze --</option>
-                            </select>
-                        </div>
-                        <button id="analyze-channel-video-btn" class="btn btn-primary">Analyze</button>
                     </div>
-                    <div id="videos-table" class="table-container" style="margin-top: 20px;">
-                        <table id="videos-data-table">
-                            <thead>
-                                <tr>
-                                    <th>Title</th>
-                                    <th>Views</th>
-                                    <th>Likes</th>
-                                    <th>Comments</th>
-                                    <th>Published</th>
-                                </tr>
-                            </thead>
-                            <tbody id="videos-tbody">
-                                <tr><td colspan="5" class="placeholder">Loading videos...</td></tr>
-                            </tbody>
-                        </table>
+                    <div id="videos-scroller" class="channels-scroller" style="margin-top: 20px; min-height: 300px;">
+                        <p class="placeholder">Loading videos...</p>
                     </div>
                 </div>
 
@@ -195,6 +204,43 @@
                         <div id="engagement-chart" class="chart-container">
                             <canvas id="engagement-canvas"></canvas>
                         </div>
+                    </div>
+                </div>
+
+                <div class="grid-2col" style="margin-top: 20px;">
+                    <div class="card">
+                        <h3>Top Comments by Video</h3>
+                        <div id="comments-chart" class="chart-container">
+                            <canvas id="comments-canvas"></canvas>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h3>Views Trend Over Time</h3>
+                        <div id="views-trend-chart" class="chart-container">
+                            <canvas id="views-trend-canvas"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid-2col" style="margin-top: 20px;">
+                    <div class="card">
+                        <h3>Engagement Rate Trend</h3>
+                        <div id="engagement-trend-chart" class="chart-container">
+                            <canvas id="engagement-trend-canvas"></canvas>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h3>CTR Proxy (Likes per View)</h3>
+                        <div id="ctr-proxy-chart" class="chart-container">
+                            <canvas id="ctr-proxy-canvas"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top: 20px;">
+                    <h3>Top 5% View Outliers</h3>
+                    <div id="outliers-chart" class="chart-container">
+                        <canvas id="outliers-canvas"></canvas>
                     </div>
                 </div>
             </section>
@@ -238,23 +284,21 @@
                 </div>
 
                 <div class="card">
-                    <div class="view-toggle">
-                        <select id="videos-view-toggle" class="view-select">
-                            <option value="search">Search Video</option>
-                            <option value="saved">Saved Videos</option>
-                        </select>
-                    </div>
-
                     <!-- Search View -->
                     <div id="video-search-view" class="search-form view-content active-view">
                         <div class="form-group">
                             <label for="video-search-input">Video ID</label>
-                            <input 
-                                type="text" 
-                                id="video-search-input" 
-                                placeholder="Enter YouTube video ID (e.g., dQw4w9WgXcQ)"
-                                class="input-field"
-                            >
+                            <div class="search-input-container">
+                                <input 
+                                    type="text" 
+                                    id="video-search-input" 
+                                    placeholder="Enter YouTube video ID (e.g., dQw4w9WgXcQ)"
+                                    class="input-field"
+                                >
+                                <select id="quick-video-select" class="quick-select-box" title="Quick select from recent/analyzed videos">
+                                    <option value="">Recent Videos</option>
+                                </select>
+                            </div>
                         </div>
 
                         <button id="video-search-btn" class="btn btn-primary">
@@ -269,13 +313,7 @@
 
                     <!-- Saved Videos View -->
                     <div id="video-saved-view" class="view-content" style="display: none;">
-                        <div class="form-group">
-                            <label for="saved-video-select">Select Video</label>
-                            <select id="saved-video-select" class="input-field">
-                                <option value="">-- Load a video first --</option>
-                            </select>
-                        </div>
-                        <button id="load-saved-video-btn" class="btn btn-primary">Load Video</button>
+                        <button id="load-saved-video-btn" class="btn btn-primary">Load Saved Video</button>
                         
                         <div id="saved-video-results" class="search-results" style="display: none; margin-top: 2rem;">
                             <h3>Video Analysis</h3>
@@ -284,7 +322,7 @@
                     </div>
                 </div>
 
-                <div class="card" style="margin-top: 2rem;">
+                <div class="card" style="margin-top: 2rem; display: none;" id="video-stats-section">
                     <h3>Video Statistics</h3>
                     <div class="grid-2col">
                         <div class="card stat-box">
@@ -306,10 +344,48 @@
                     </div>
                 </div>
 
-                <div class="card">
-                    <h3>Engagement Visualization</h3>
-                    <div id="video-engagement-chart" class="chart-container">
-                        <canvas id="video-engagement-canvas"></canvas>
+                <div class="grid-2col" style="margin-top: 2rem; display: none;" id="video-advanced-charts-section">
+                    <div class="card">
+                        <h3>Engagement Composition</h3>
+                        <div class="chart-container">
+                            <canvas id="video-composition-canvas"></canvas>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h3>Benchmark vs Saved Videos</h3>
+                        <div class="chart-container">
+                            <canvas id="video-benchmark-canvas"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid-2col" style="margin-top: 2rem; display: none;" id="video-insights-charts-section">
+                    <div class="card">
+                        <h3>Engagement Rate Breakdown</h3>
+                        <div class="chart-container">
+                            <canvas id="video-engagement-rate-canvas"></canvas>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h3>Performance Percentile</h3>
+                        <div class="chart-container">
+                            <canvas id="video-percentile-canvas"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid-2col" style="margin-top: 2rem; display: none;" id="video-trend-charts-section">
+                    <div class="card">
+                        <h3>Trend vs Channel Average</h3>
+                        <div class="chart-container">
+                            <canvas id="video-channel-trend-canvas"></canvas>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h3>Velocity Proxy</h3>
+                        <div class="chart-container">
+                            <canvas id="video-velocity-canvas"></canvas>
+                        </div>
                     </div>
                 </div>
             </section>

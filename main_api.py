@@ -4,9 +4,9 @@ Professional and production-ready FastAPI backend for YouTube analytics.
 Provides RESTful API endpoints for YouTube data management.
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from pathlib import Path
@@ -28,7 +28,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -111,6 +111,8 @@ async def search_channel(search: ChannelSearch, background_tasks: BackgroundTask
         background_tasks.add_task(fetch_channel_videos, channel_data['channel_id'])
         
         return channel_data
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -121,6 +123,8 @@ async def get_all_channels():
     try:
         channels = db.get_all_channels()
         return {"channels": channels, "count": len(channels)}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -139,8 +143,11 @@ async def get_channel_details(channel_id: str):
         return {
             "channel": channel_data,
             "statistics": stats,
+            "videos": videos,
             "videos_count": len(videos)
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -151,6 +158,8 @@ async def fetch_channel_videos_endpoint(channel_id: str, background_tasks: Backg
     try:
         background_tasks.add_task(fetch_channel_videos, channel_id)
         return {"message": "Fetching videos in background", "channel_id": channel_id}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -174,6 +183,8 @@ async def get_channel_videos(channel_id: str, limit: int = 50):
             "statistics": stats,
             "charts": charts
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -190,7 +201,28 @@ async def search_video(video: VideoSearch):
         # Save video to database if channel exists
         db.add_video(video_data)
         
-        return video_data
+        return {"videos": [video_data]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/video/search")
+async def search_video_get(q: str):
+    """Search for a video by ID (GET method)"""
+    try:
+        video_data = fetcher.get_video_by_id(q)
+        
+        if "error" in video_data:
+            raise HTTPException(status_code=404, detail=video_data["error"])
+        
+        # Save video to database if channel exists
+        db.add_video(video_data)
+        
+        return {"videos": [video_data]}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -204,6 +236,8 @@ async def get_statistics(channel_id: str):
             raise HTTPException(status_code=404, detail="Statistics not found")
         
         return stats
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -214,6 +248,8 @@ async def delete_channel(channel_id: str):
     try:
         db.delete_channel(channel_id)
         return {"message": "Channel deleted successfully", "channel_id": channel_id}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -262,12 +298,20 @@ def generate_visualizations(channel_id: str, videos: List[dict]) -> dict:
 # ==================== Error Handlers ====================
 
 @app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
+async def http_exception_handler(request: Request, exc: HTTPException):
     """Handle HTTP exceptions"""
-    return {
-        "error": exc.detail,
-        "status_code": exc.status_code
-    }
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.detail, "status_code": exc.status_code}
+    )
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Catch-all handler to return JSON for unexpected errors."""
+    return JSONResponse(
+        status_code=500,
+        content={"error": str(exc), "status_code": 500}
+    )
 
 
 # ==================== Startup/Shutdown ====================

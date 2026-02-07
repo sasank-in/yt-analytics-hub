@@ -5,15 +5,47 @@
 
 // ==================== CONFIGURATION ====================
 
-const API_BASE_URL = 'http://localhost:3000/api';
+const API_BASE_URL = `${window.location.origin}/api`;
 let currentChannelId = null;
 let allChannels = [];
 let savedVideos = []; // Store analyzed videos
 let currentChannelVideos = []; // Store channel videos for quick access
+let videoEngagementChartInstance = null;
+let engagementChartInstance = null;
+let topVideosChartInstance = null;
+let commentsChartInstance = null;
+let viewsTrendChartInstance = null;
+let engagementTrendChartInstance = null;
+let ctrProxyChartInstance = null;
+let outliersChartInstance = null;
+let dashboardSubscribersChartInstance = null;
+let dashboardViewsChartInstance = null;
+let videoCompositionChartInstance = null;
+let videoPerformanceChartInstance = null;
+let videoEngagementRateChartInstance = null;
+let videoBenchmarkChartInstance = null;
+let videoPercentileChartInstance = null;
+let videoChannelTrendChartInstance = null;
+let videoVelocityChartInstance = null;
+
+const CHART_THEME = {
+    text: '#1b2b3a',
+    textMuted: '#5b6b7a',
+    grid: 'rgba(226, 231, 236, 0.8)',
+    border: '#d6dde5',
+    brandBlue: '#0f4c81',
+    brandBlueLight: 'rgba(15, 76, 129, 0.15)',
+    brandGreen: '#1f7a55',
+    brandGreenLight: 'rgba(31, 122, 85, 0.18)',
+    brandGold: '#b0874a',
+    brandGoldLight: 'rgba(176, 135, 74, 0.18)',
+    shadow: 'rgba(9, 30, 66, 0.15)'
+};
 
 // ==================== INITIALIZATION ====================
 
 document.addEventListener('DOMContentLoaded', async () => {
+    applyChartTheme();
     initializeEventListeners();
     loadSavedVideos();
     await checkAPIHealth();
@@ -25,22 +57,6 @@ function initializeEventListeners() {
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.addEventListener('click', handleNavigation);
     });
-
-    // View Toggle Dropdown for Channels
-    const viewToggle = document.getElementById('channels-view-toggle');
-    if (viewToggle) {
-        viewToggle.addEventListener('change', (e) => {
-            switchChannelsView(e.target.value);
-        });
-    }
-
-    // View Toggle Dropdown for Videos
-    const videoViewToggle = document.getElementById('videos-view-toggle');
-    if (videoViewToggle) {
-        videoViewToggle.addEventListener('change', (e) => {
-            switchVideosView(e.target.value);
-        });
-    }
 
     // Search
     document.getElementById('search-btn').addEventListener('click', handleChannelSearch);
@@ -60,16 +76,31 @@ function initializeEventListeners() {
         }
     }
 
+    // Quick Select Boxes
+    const quickChannelSelect = document.getElementById('quick-channel-select');
+    if (quickChannelSelect) {
+        quickChannelSelect.addEventListener('change', (e) => {
+            if (e.target.value) {
+                document.getElementById('search-query').value = e.target.value;
+                e.target.value = '';  // Reset dropdown
+            }
+        });
+    }
+
+    const quickVideoSelect = document.getElementById('quick-video-select');
+    if (quickVideoSelect) {
+        quickVideoSelect.addEventListener('change', (e) => {
+            if (e.target.value) {
+                document.getElementById('video-search-input').value = e.target.value;
+                e.target.value = '';  // Reset dropdown
+            }
+        });
+    }
+
     // Saved Video Selection
     const loadSavedVideoBtn = document.getElementById('load-saved-video-btn');
     if (loadSavedVideoBtn) {
         loadSavedVideoBtn.addEventListener('click', loadSelectedSavedVideo);
-    }
-
-    // Channel Video Analysis
-    const analyzeChannelVideoBtn = document.getElementById('analyze-channel-video-btn');
-    if (analyzeChannelVideoBtn) {
-        analyzeChannelVideoBtn.addEventListener('click', handleAnalyzeChannelVideo);
     }
 
     // Back button
@@ -122,6 +153,14 @@ function showSection(sectionId) {
             document.getElementById('video-search-input').value = '';
         }
     }
+
+    // Ensure channel details view does not overlay other tabs
+    if (sectionId !== 'channel-details') {
+        const details = document.getElementById('channel-details');
+        if (details) details.style.display = 'none';
+        const list = document.getElementById('channels-list');
+        if (list) list.style.display = 'grid';
+    }
 }
 
 // ==================== CHANNELS VIEW TOGGLE ====================
@@ -168,9 +207,6 @@ function switchVideosView(view) {
         
         searchView.style.display = 'none';
         savedView.style.display = 'block';
-        
-        // Populate saved videos dropdown
-        populateSavedVideosDropdown();
     }
 }
 
@@ -180,6 +216,9 @@ async function loadDashboard() {
     try {
         const channels = await fetchAPI('/channels');
         const totalChannels = channels.count || 0;
+        
+        // Store for use in other functions
+        allChannels = channels.channels || [];
         
         let totalVideos = 0;
         channels.channels.forEach(ch => {
@@ -191,6 +230,13 @@ async function loadDashboard() {
         
         // Load recent channels
         loadRecentChannels(channels.channels.slice(0, 5));
+        
+        // Populate quick select box with channels
+        populateQuickChannelSelect(allChannels);
+
+        drawDashboardCharts(allChannels);
+        updateDashboardHighlights(allChannels);
+        
     } catch (error) {
         console.error('Dashboard load error:', error);
         showToast('Error loading dashboard', 'error');
@@ -215,11 +261,213 @@ function loadRecentChannels(channels) {
     `).join('');
 }
 
+function drawDashboardCharts(channels) {
+    const subscribersCanvas = document.getElementById('dashboard-subscribers-canvas');
+    const viewsCanvas = document.getElementById('dashboard-views-canvas');
+
+    if (!subscribersCanvas || !viewsCanvas) return;
+
+    if (dashboardSubscribersChartInstance) dashboardSubscribersChartInstance.destroy();
+    if (dashboardViewsChartInstance) dashboardViewsChartInstance.destroy();
+
+    if (!channels || channels.length === 0) {
+        subscribersCanvas.parentElement.innerHTML = '<p class="placeholder">No channel data available</p>';
+        viewsCanvas.parentElement.innerHTML = '<p class="placeholder">No channel data available</p>';
+        return;
+    }
+
+    const topBySubscribers = [...channels]
+        .map(c => ({ title: (c.title || 'Channel').substring(0, 18), subscribers: toNumber(c.subscribers) }))
+        .sort((a, b) => b.subscribers - a.subscribers)
+        .slice(0, 8);
+
+    const topByViews = [...channels]
+        .map(c => ({ title: (c.title || 'Channel').substring(0, 18), views: toNumber(c.total_views) }))
+        .sort((a, b) => b.views - a.views)
+        .slice(0, 6);
+
+    const subsCtx = subscribersCanvas.getContext('2d');
+    dashboardSubscribersChartInstance = new Chart(subsCtx, {
+        type: 'bar',
+        data: {
+            labels: topBySubscribers.map(c => c.title),
+            datasets: [{
+                label: 'Subscribers',
+                data: topBySubscribers.map(c => c.subscribers),
+                backgroundColor: CHART_THEME.brandBlueLight,
+                borderColor: CHART_THEME.brandBlue,
+                borderWidth: 2,
+                borderRadius: 10,
+                borderSkipped: false,
+                hoverBackgroundColor: CHART_THEME.brandBlue,
+                hoverBorderWidth: 2.5
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Top Channels by Subscribers', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 14,
+                    titleFont: { size: 13, weight: '600' },
+                    bodyFont: { size: 12, weight: '500' },
+                    borderColor: CHART_THEME.border,
+                    borderWidth: 1,
+                    callbacks: { label: (c) => formatNumber(c.parsed.y) + ' subs' }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: CHART_THEME.grid, drawBorder: true, borderColor: CHART_THEME.border },
+                    ticks: { color: CHART_THEME.textMuted, font: { size: 12, weight: '500' }, callback: (v) => formatNumber(v), padding: 10 }
+                },
+                x: {
+                    grid: { display: false, drawBorder: false },
+                    ticks: { color: CHART_THEME.text, font: { size: 12, weight: '600' }, padding: 10 }
+                }
+            }
+        }
+    });
+
+    const viewsCtx = viewsCanvas.getContext('2d');
+    dashboardViewsChartInstance = new Chart(viewsCtx, {
+        type: 'doughnut',
+        data: {
+            labels: topByViews.map(c => c.title),
+            datasets: [{
+                label: 'Views Share',
+                data: topByViews.map(c => c.views),
+                backgroundColor: [
+                    'rgba(15, 76, 129, 0.85)',
+                    'rgba(31, 122, 85, 0.85)',
+                    'rgba(176, 135, 74, 0.85)',
+                    'rgba(45, 120, 190, 0.85)',
+                    'rgba(95, 166, 127, 0.85)',
+                    'rgba(196, 170, 123, 0.85)'
+                ],
+                borderColor: CHART_THEME.border,
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Portfolio Views Mix', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                legend: { position: 'bottom', labels: { color: CHART_THEME.textMuted, font: { size: 11, weight: '600' } } },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 14,
+                    titleFont: { size: 12, weight: '600' },
+                    bodyFont: { size: 12, weight: '500' },
+                    borderColor: CHART_THEME.border,
+                    borderWidth: 1,
+                    callbacks: { label: (c) => formatNumber(c.parsed) + ' views' }
+                }
+            }
+        }
+    });
+}
+
+function updateDashboardHighlights(channels) {
+    const topChannelEl = document.getElementById('highlight-top-channel');
+    const topChannelMetricEl = document.getElementById('highlight-top-channel-metric');
+    const topEngagementEl = document.getElementById('highlight-top-engagement');
+    const topEngagementMetricEl = document.getElementById('highlight-top-engagement-metric');
+    const totalAudienceEl = document.getElementById('highlight-total-audience');
+    const avgViewsEl = document.getElementById('highlight-avg-views');
+
+    if (!channels || channels.length === 0) {
+        if (topChannelEl) topChannelEl.textContent = 'No data';
+        if (topChannelMetricEl) topChannelMetricEl.textContent = 'Search a channel to populate';
+        if (topEngagementEl) topEngagementEl.textContent = 'No data';
+        if (topEngagementMetricEl) topEngagementMetricEl.textContent = 'Add channels to analyze';
+        if (totalAudienceEl) totalAudienceEl.textContent = '0';
+        if (avgViewsEl) avgViewsEl.textContent = '0';
+        return;
+    }
+
+    const topChannel = [...channels].sort((a, b) => toNumber(b.subscribers) - toNumber(a.subscribers))[0];
+    const topEngagement = [...channels].map(c => {
+        const views = toNumber(c.total_views);
+        const videos = toNumber(c.total_videos);
+        const rate = videos > 0 ? (views / videos) : 0;
+        return { title: c.title || 'Channel', rate };
+    }).sort((a, b) => b.rate - a.rate)[0];
+
+    const totalAudience = channels.reduce((sum, c) => sum + toNumber(c.subscribers), 0);
+    const totalViews = channels.reduce((sum, c) => sum + toNumber(c.total_views), 0);
+    const totalVideos = channels.reduce((sum, c) => sum + toNumber(c.total_videos), 0);
+    const avgViews = totalVideos > 0 ? Math.round(totalViews / totalVideos) : 0;
+
+    if (topChannelEl) topChannelEl.textContent = topChannel?.title || '-';
+    if (topChannelMetricEl) topChannelMetricEl.textContent = topChannel ? `${formatNumber(topChannel.subscribers)} subscribers` : '-';
+    if (topEngagementEl) topEngagementEl.textContent = topEngagement?.title || '-';
+    if (topEngagementMetricEl) topEngagementMetricEl.textContent = topEngagement ? `${formatNumber(Math.round(topEngagement.rate))} views/video` : '-';
+    if (totalAudienceEl) totalAudienceEl.textContent = formatNumber(totalAudience);
+    if (avgViewsEl) avgViewsEl.textContent = formatNumber(avgViews);
+}
+
+// ==================== QUICK SELECT BOXES ====================
+
+function populateQuickChannelSelect(channels = null) {
+    const select = document.getElementById('quick-channel-select');
+    if (!select) return;
+
+    // Use passed channels or fetch all channels
+    const channelsToUse = channels || allChannels;
+    
+    // Clear existing options except first one
+    while (select.options.length > 1) {
+        select.remove(1);
+    }
+
+    // Add recent/saved channels to dropdown
+    if (channelsToUse && channelsToUse.length > 0) {
+        channelsToUse.slice(0, 8).forEach(ch => {
+            const option = document.createElement('option');
+            option.value = ch.title || ch.channel_id;
+            const title = (ch.title || 'Unknown').substring(0, 35);
+            option.text = `📺 ${title}`;
+            select.appendChild(option);
+        });
+    }
+}
+
+function populateQuickVideoSelect(videos = null) {
+    const select = document.getElementById('quick-video-select');
+    if (!select) return;
+
+    // Use passed videos or use saved videos
+    const videosToUse = videos || savedVideos;
+    
+    // Clear existing options except first one
+    while (select.options.length > 1) {
+        select.remove(1);
+    }
+
+    // Add recent/saved videos to dropdown
+    if (videosToUse && videosToUse.length > 0) {
+        videosToUse.slice(0, 8).forEach((video, index) => {
+            const option = document.createElement('option');
+            option.value = video.video_id || '';
+            const title = (video.title || 'Video').substring(0, 30);
+            option.text = `🎬 ${title}`;
+            select.appendChild(option);
+        });
+    }
+}
+
 // ==================== SEARCH ====================
 
 async function handleChannelSearch() {
     const query = document.getElementById('search-query').value.trim();
-    const searchType = document.querySelector('input[name="search_type"]:checked').value;
     
     if (!query) {
         showToast('Please enter a search query', 'info');
@@ -233,7 +481,7 @@ async function handleChannelSearch() {
             method: 'POST',
             body: JSON.stringify({
                 query,
-                search_type: searchType
+                search_type: 'name'  // Default to name search
             })
         });
 
@@ -343,7 +591,10 @@ async function selectChannel(channelId) {
         document.getElementById('channel-video-count').textContent = channel.total_videos;
         
         if (stats) {
-            const engagement = stats.average_engagement_rate || 0;
+            const totalViews = Number(stats.total_views || 0);
+            const totalLikes = Number(stats.total_likes || 0);
+            const totalComments = Number(stats.total_comments || 0);
+            const engagement = totalViews > 0 ? ((totalLikes + totalComments) / totalViews * 100) : 0;
             document.getElementById('channel-engagement').textContent = engagement.toFixed(2) + '%';
         }
         
@@ -370,40 +621,37 @@ async function loadChannelVideos(channelId) {
         // Store for quick access
         currentChannelVideos = videos;
 
-        const tbody = document.getElementById('videos-tbody');
+        const scroller = document.getElementById('videos-scroller');
         
         if (videos.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="placeholder">No videos found. Click "Fetch Videos" to load data.</td></tr>';
+            scroller.innerHTML = '<p class="placeholder">No videos found. Click "Fetch Videos" to load data.</p>';
             return;
         }
 
-        tbody.innerHTML = videos.slice(0, 20).map(video => `
-            <tr>
-                <td>${video.title}</td>
-                <td>${formatNumber(video.views)}</td>
-                <td>${formatNumber(video.likes)}</td>
-                <td>${formatNumber(video.comments)}</td>
-                <td>${formatDate(video.published_at)}</td>
-            </tr>
+        scroller.innerHTML = videos.map(video => `
+            <div class="channel-card-scroll" style="flex: 0 0 300px;">
+                <img src="${video.thumbnail || 'placeholder.jpg'}" alt="${video.title || 'Video'}" style="width: 100%; height: 150px; object-fit: cover; border-radius: 8px;">
+                <div style="padding: 12px;">
+                    <h4 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600; color: var(--text-primary); line-height: 1.4;">${video.title}</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px; color: var(--text-secondary);">
+                        <div><strong style="color: var(--primary-blue);">${formatNumber(video.views)}</strong> views</div>
+                        <div><strong style="color: var(--accent-green);">${formatNumber(video.likes)}</strong> likes</div>
+                        <div><strong style="color: var(--accent-orange);">${formatNumber(video.comments)}</strong> comments</div>
+                        <div>${formatDate(video.published_at)}</div>
+                    </div>
+                </div>
+            </div>
         `).join('');
-
-        // Populate video dropdown
-        const videoSelect = document.getElementById('channel-video-select');
-        if (videoSelect) {
-            videoSelect.innerHTML = '<option value="">-- Select a video to analyze --</option>';
-            videos.forEach((video, index) => {
-                const option = document.createElement('option');
-                option.value = index; // Store index for easy access
-                const title = (video.title || 'Video').substring(0, 50);
-                option.text = `${title} (${formatNumber(video.views)} views)`;
-                videoSelect.appendChild(option);
-            });
-        }
 
         // Draw charts with video data
         setTimeout(() => {
             const topVideosCanvas = document.getElementById('top-videos-canvas');
             const engagementCanvas = document.getElementById('engagement-canvas');
+            const commentsCanvas = document.getElementById('comments-canvas');
+            const viewsTrendCanvas = document.getElementById('views-trend-canvas');
+            const engagementTrendCanvas = document.getElementById('engagement-trend-canvas');
+            const ctrProxyCanvas = document.getElementById('ctr-proxy-canvas');
+            const outliersCanvas = document.getElementById('outliers-canvas');
             
             if (topVideosCanvas && topVideosCanvas.getContext) {
                 drawTopVideosChart(topVideosCanvas, videos);
@@ -411,10 +659,25 @@ async function loadChannelVideos(channelId) {
             if (engagementCanvas && engagementCanvas.getContext) {
                 drawEngagementChart(engagementCanvas, videos);
             }
+            if (commentsCanvas && commentsCanvas.getContext) {
+                drawCommentsChart(commentsCanvas, videos);
+            }
+            if (viewsTrendCanvas && viewsTrendCanvas.getContext) {
+                drawViewsTrendChart(viewsTrendCanvas, videos);
+            }
+            if (engagementTrendCanvas && engagementTrendCanvas.getContext) {
+                drawEngagementTrendChart(engagementTrendCanvas, videos);
+            }
+            if (ctrProxyCanvas && ctrProxyCanvas.getContext) {
+                drawCtrProxyChart(ctrProxyCanvas, videos);
+            }
+            if (outliersCanvas && outliersCanvas.getContext) {
+                drawOutliersChart(outliersCanvas, videos);
+            }
         }, 100);
     } catch (error) {
-        document.getElementById('videos-tbody').innerHTML = 
-            `<tr><td colspan="5" class="placeholder">Error loading videos: ${error.message}</td></tr>`;
+        document.getElementById('videos-scroller').innerHTML = 
+            `<p class="placeholder">Error loading videos: ${error.message}</p>`;
     }
 }
 
@@ -567,17 +830,23 @@ async function handleVideoSearch() {
 }
 
 function displayVideoAnalytics(video) {
-    const views = parseInt(video.views || 0);
-    const likes = parseInt(video.likes || 0);
-    const comments = parseInt(video.comments || 0);
+    // Show video statistics and chart sections
+    document.getElementById('video-stats-section').style.display = 'block';
+    document.getElementById('video-advanced-charts-section').style.display = 'grid';
+    document.getElementById('video-insights-charts-section').style.display = 'grid';
+    document.getElementById('video-trend-charts-section').style.display = 'grid';
+    
+    const views = toNumber(video.views);
+    const likes = toNumber(video.likes);
+    const comments = toNumber(video.comments);
     
     // Calculate engagement rate
     const engagementRate = views > 0 ? ((likes + comments) / views * 100).toFixed(2) : 0;
     
     // Update statistics
-    document.getElementById('video-views').textContent = formatNumber(views);
-    document.getElementById('video-likes').textContent = formatNumber(likes);
-    document.getElementById('video-comments').textContent = formatNumber(comments);
+    document.getElementById('video-views').textContent = formatNumber(video.views);
+    document.getElementById('video-likes').textContent = formatNumber(video.likes);
+    document.getElementById('video-comments').textContent = formatNumber(video.comments);
     document.getElementById('video-engagement').textContent = engagementRate + '%';
     
     // Update video details
@@ -591,253 +860,969 @@ function displayVideoAnalytics(video) {
         </div>
     `;
     
-    // Update engagement chart (canvas-based)
-    const chartDiv = document.getElementById('video-engagement-chart');
-    const canvas = document.getElementById('video-engagement-canvas');
-    
-    if (canvas && canvas.getContext) {
-        const totalEngagement = likes + comments;
-        const data = {
-            likes: likes,
-            comments: comments,
-            views: views
-        };
-        drawVideoEngagementChart(canvas, data);
-    } else {
-        // Fallback to simple visualization
-        const totalEngagement = likes + comments;
-        const likePercent = totalEngagement > 0 ? (likes / totalEngagement * 100).toFixed(1) : 0;
-        const commentPercent = totalEngagement > 0 ? (comments / totalEngagement * 100).toFixed(1) : 0;
-        
-        chartDiv.innerHTML = `
-            <div class="engagement-breakdown">
-                <div class="engagement-stat">
-                    <strong>Likes: ${likePercent}%</strong>
-                    <div class="bar" style="width: ${likePercent}%; background: #4CAF50;"></div>
-                </div>
-                <div class="engagement-stat">
-                    <strong>Comments: ${commentPercent}%</strong>
-                    <div class="bar" style="width: ${commentPercent}%; background: #2196F3;"></div>
-                </div>
-            </div>
-        `;
+    const data = { likes, comments, views };
+    drawVideoCompositionChart(document.getElementById('video-composition-canvas'), data);
+    drawVideoBenchmarkChart(document.getElementById('video-benchmark-canvas'), data);
+    drawVideoEngagementRateChart(document.getElementById('video-engagement-rate-canvas'), data);
+    drawVideoPercentileChart(document.getElementById('video-percentile-canvas'), data);
+    drawVideoChannelTrendChart(document.getElementById('video-channel-trend-canvas'), video, currentChannelVideos);
+    drawVideoVelocityChart(document.getElementById('video-velocity-canvas'), video);
+}
+
+function drawVideoCompositionChart(canvas, data) {
+    if (!canvas || !canvas.getContext) return;
+    if (videoCompositionChartInstance) {
+        videoCompositionChartInstance.destroy();
     }
+
+    const total = data.views + data.likes + data.comments;
+    const ctx = canvas.getContext('2d');
+    videoCompositionChartInstance = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Views', 'Likes', 'Comments'],
+            datasets: [{
+                data: [data.views, data.likes, data.comments],
+                backgroundColor: [
+                    'rgba(15, 76, 129, 0.85)',
+                    'rgba(31, 122, 85, 0.85)',
+                    'rgba(176, 135, 74, 0.85)'
+                ],
+                borderColor: CHART_THEME.border,
+                borderWidth: 1.5
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Engagement Composition', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                legend: { position: 'bottom', labels: { color: CHART_THEME.textMuted, font: { size: 11, weight: '600' } } },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 14,
+                    titleFont: { size: 12, weight: '600' },
+                    bodyFont: { size: 12, weight: '500' },
+                    borderColor: CHART_THEME.border,
+                    borderWidth: 1,
+                    callbacks: {
+                        label: (c) => {
+                            const pct = total > 0 ? ((c.parsed / total) * 100).toFixed(1) : '0.0';
+                            return `${formatNumber(c.parsed)} (${pct}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function drawVideoBenchmarkChart(canvas, data) {
+    if (!canvas || !canvas.getContext) return;
+    if (videoBenchmarkChartInstance) {
+        videoBenchmarkChartInstance.destroy();
+    }
+
+    const benchmarks = getSavedBenchmarks();
+    const viewsScaled = data.views / 100;
+    const viewsBaseline = benchmarks.views / 100;
+    const ctx = canvas.getContext('2d');
+    videoBenchmarkChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['Views (÷100)', 'Likes', 'Comments'],
+            datasets: [{
+                label: 'This Video',
+                data: [viewsScaled, data.likes, data.comments],
+                backgroundColor: [CHART_THEME.brandBlueLight, CHART_THEME.brandGreenLight, CHART_THEME.brandGoldLight],
+                borderColor: [CHART_THEME.brandBlue, CHART_THEME.brandGreen, CHART_THEME.brandGold],
+                borderWidth: 2,
+                borderRadius: 10,
+                borderSkipped: false
+            }, {
+                label: 'Saved Median',
+                data: [viewsBaseline, benchmarks.likes, benchmarks.comments],
+                backgroundColor: 'rgba(120, 130, 140, 0.12)',
+                borderColor: 'rgba(120, 130, 140, 0.8)',
+                borderWidth: 2,
+                borderRadius: 10,
+                borderSkipped: false
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Benchmark vs Saved Videos', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                legend: { position: 'bottom', labels: { color: CHART_THEME.textMuted, font: { size: 11, weight: '600' } } },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 14,
+                    titleFont: { size: 12, weight: '600' },
+                    bodyFont: { size: 12, weight: '500' },
+                    borderColor: CHART_THEME.border,
+                    borderWidth: 1,
+                    callbacks: { label: (c) => formatNumber(c.parsed.y) }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: CHART_THEME.grid, drawBorder: true, borderColor: CHART_THEME.border },
+                    ticks: { color: CHART_THEME.textMuted, font: { size: 12, weight: '500' }, callback: (v) => formatNumber(v), padding: 10 }
+                },
+                x: {
+                    grid: { display: false, drawBorder: false },
+                    ticks: { color: CHART_THEME.text, font: { size: 12, weight: '600' }, padding: 10 }
+                }
+            }
+        }
+    });
 }
 
 // ==================== CHART FUNCTIONS ====================
 
-function drawVideoEngagementChart(canvas, data) {
-    const ctx = canvas.getContext('2d');
-    const width = canvas.offsetWidth || 300;
-    const height = canvas.offsetHeight || 200;
-    
-    canvas.width = width;
-    canvas.height = height;
-    
-    const padding = 40;
-    const chartWidth = width - padding * 2;
-    const chartHeight = height - padding * 2;
-    
-    const maxValue = Math.max(data.likes, data.comments, data.views);
-    const scale = chartHeight / maxValue;
-    
-    // Background
-    ctx.fillStyle = '#f5f7fa';
-    ctx.fillRect(0, 0, width, height);
-    
-    // Grid lines
-    ctx.strokeStyle = '#ecf0f1';
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) {
-        const y = padding + (chartHeight / 4) * i;
-        ctx.beginPath();
-        ctx.moveTo(padding, y);
-        ctx.lineTo(width - padding, y);
-        ctx.stroke();
-    }
-    
-    // Draw bars
-    const barWidth = chartWidth / 3;
-    const spacing = 10;
-    
-    // Likes bar
-    const likesHeight = data.likes * scale;
-    ctx.fillStyle = '#4CAF50';
-    ctx.fillRect(padding + spacing, height - padding - likesHeight, barWidth - spacing * 2, likesHeight);
-    
-    // Comments bar
-    const commentsHeight = data.comments * scale;
-    ctx.fillStyle = '#2196F3';
-    ctx.fillRect(padding + barWidth + spacing, height - padding - commentsHeight, barWidth - spacing * 2, commentsHeight);
-    
-    // Views bar (scaled down for visibility)
-    const viewsHeight = (data.views / 100) * scale;
-    ctx.fillStyle = '#FF9800';
-    ctx.fillRect(padding + barWidth * 2 + spacing, height - padding - viewsHeight, barWidth - spacing * 2, viewsHeight);
-    
-    // Labels
-    ctx.fillStyle = '#2c3e50';
-    ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.textAlign = 'center';
-    
-    ctx.fillText('Likes', padding + barWidth / 2, height - padding + 20);
-    ctx.fillText('Comments', padding + barWidth * 1.5, height - padding + 20);
-    ctx.fillText('Views (÷100)', padding + barWidth * 2.5, height - padding + 20);
-    
-    // Values on bars
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 11px sans-serif';
-    ctx.fillText(formatNumber(data.likes), padding + barWidth / 2, height - padding - likesHeight + 20);
-    ctx.fillText(formatNumber(data.comments), padding + barWidth * 1.5, height - padding - commentsHeight + 20);
-}
-
 function drawEngagementChart(canvas, videos) {
-    const ctx = canvas.getContext('2d');
-    const width = canvas.offsetWidth || 300;
-    const height = canvas.offsetHeight || 200;
-    
-    canvas.width = width;
-    canvas.height = height;
-    
-    const padding = 40;
-    const chartWidth = width - padding * 2;
-    const chartHeight = height - padding * 2;
-    
+    if (engagementChartInstance) {
+        engagementChartInstance.destroy();
+    }
+
     if (videos.length === 0) {
-        ctx.fillStyle = '#7f8c8d';
-        ctx.font = '14px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('No video data available', width / 2, height / 2);
+        canvas.parentElement.innerHTML = '<p class="placeholder">No video data available</p>';
         return;
     }
-    
-    // Get engagement rates
+
     const engagements = videos.map(v => {
-        const views = parseInt(v.views) || 0;
-        const likes = parseInt(v.likes) || 0;
-        const comments = parseInt(v.comments) || 0;
+        const views = toNumber(v.views);
+        const likes = toNumber(v.likes);
+        const comments = toNumber(v.comments);
         return {
-            title: (v.title || 'Video').substring(0, 10),
+            title: (v.title || 'Video').substring(0, 18),
             rate: views > 0 ? ((likes + comments) / views * 100) : 0
         };
-    }).slice(0, 5);
+    }).sort((a, b) => b.rate - a.rate).slice(0, 8);
+
+    const ctx = canvas.getContext('2d');
     
-    const maxRate = Math.max(...engagements.map(e => e.rate));
-    const scale = chartHeight / (maxRate || 1);
-    
-    // Background
-    ctx.fillStyle = '#f5f7fa';
-    ctx.fillRect(0, 0, width, height);
-    
-    // Grid lines
-    ctx.strokeStyle = '#ecf0f1';
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) {
-        const y = padding + (chartHeight / 4) * i;
-        ctx.beginPath();
-        ctx.moveTo(padding, y);
-        ctx.lineTo(width - padding, y);
-        ctx.stroke();
-    }
-    
-    // Draw bars
-    const barWidth = chartWidth / engagements.length;
-    const spacing = 5;
-    
-    engagements.forEach((eng, i) => {
-        const barHeight = eng.rate * scale;
-        const x = padding + (barWidth * i) + spacing;
-        
-        ctx.fillStyle = '#0066cc';
-        ctx.fillRect(x, height - padding - barHeight, barWidth - spacing * 2, barHeight);
-        
-        // Labels
-        ctx.fillStyle = '#2c3e50';
-        ctx.font = '11px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(eng.title, x + (barWidth - spacing * 2) / 2, height - padding + 20);
-        
-        // Values
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 10px sans-serif';
-        if (barHeight > 20) {
-            ctx.fillText(eng.rate.toFixed(1) + '%', x + (barWidth - spacing * 2) / 2, height - padding - barHeight + 15);
+    engagementChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: engagements.map(e => e.title),
+            datasets: [{
+                label: 'Engagement Rate (%)',
+                data: engagements.map(e => e.rate),
+                backgroundColor: CHART_THEME.brandBlueLight,
+                borderColor: CHART_THEME.brandBlue,
+                borderWidth: 2,
+                borderRadius: 10,
+                borderSkipped: false,
+                hoverBackgroundColor: CHART_THEME.brandBlue,
+                hoverBorderWidth: 2.5
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Top Engagement Rates', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 14,
+                    titleFont: { size: 13, weight: '600' },
+                    bodyFont: { size: 12, weight: '500' },
+                    borderColor: CHART_THEME.border,
+                    borderWidth: 1,
+                    callbacks: { label: (c) => c.parsed.x.toFixed(2) + '%' }
+                }
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    max: 100,
+                    grid: { color: CHART_THEME.grid, drawBorder: true, borderColor: CHART_THEME.border },
+                    ticks: { color: CHART_THEME.textMuted, font: { size: 12, weight: '500' }, callback: (v) => v + '%', padding: 10 }
+                },
+                y: {
+                    grid: { display: false, drawBorder: false },
+                    ticks: { color: CHART_THEME.text, font: { size: 12, weight: '600' }, padding: 10 }
+                }
+            }
         }
     });
+}
+
+function drawVideoEngagementRateChart(canvas, data) {
+    if (!canvas || !canvas.getContext) return;
+    if (videoEngagementRateChartInstance) {
+        videoEngagementRateChartInstance.destroy();
+    }
+
+    const engagementRate = data.views > 0 ? ((data.likes + data.comments) / data.views) * 100 : 0;
+    const likeRate = data.views > 0 ? (data.likes / data.views) * 100 : 0;
+    const commentRate = data.views > 0 ? (data.comments / data.views) * 100 : 0;
+
+    const ctx = canvas.getContext('2d');
+    videoEngagementRateChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['Engagement', 'Like Rate', 'Comment Rate'],
+            datasets: [{
+                label: 'Rate (%)',
+                data: [engagementRate, likeRate, commentRate],
+                backgroundColor: [CHART_THEME.brandGreenLight, CHART_THEME.brandBlueLight, CHART_THEME.brandGoldLight],
+                borderColor: [CHART_THEME.brandGreen, CHART_THEME.brandBlue, CHART_THEME.brandGold],
+                borderWidth: 2,
+                borderRadius: 10,
+                borderSkipped: false
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Engagement Rate Breakdown', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 14,
+                    titleFont: { size: 12, weight: '600' },
+                    bodyFont: { size: 12, weight: '500' },
+                    borderColor: CHART_THEME.border,
+                    borderWidth: 1,
+                    callbacks: { label: (c) => c.parsed.y.toFixed(2) + '%' }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: CHART_THEME.grid, drawBorder: true, borderColor: CHART_THEME.border },
+                    ticks: { color: CHART_THEME.textMuted, font: { size: 12, weight: '500' }, callback: (v) => v + '%', padding: 10 }
+                },
+                x: {
+                    grid: { display: false, drawBorder: false },
+                    ticks: { color: CHART_THEME.text, font: { size: 12, weight: '600' }, padding: 10 }
+                }
+            }
+        }
+    });
+}
+
+function drawVideoPercentileChart(canvas, data) {
+    if (!canvas || !canvas.getContext) return;
+    if (videoPercentileChartInstance) {
+        videoPercentileChartInstance.destroy();
+    }
+
+    const percentile = getPerformancePercentile(data);
+    const ctx = canvas.getContext('2d');
+    videoPercentileChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['Views', 'Likes', 'Comments'],
+            datasets: [{
+                label: 'Percentile vs Saved Videos',
+                data: [percentile.views, percentile.likes, percentile.comments],
+                backgroundColor: [CHART_THEME.brandBlueLight, CHART_THEME.brandGreenLight, CHART_THEME.brandGoldLight],
+                borderColor: [CHART_THEME.brandBlue, CHART_THEME.brandGreen, CHART_THEME.brandGold],
+                borderWidth: 2,
+                borderRadius: 10,
+                borderSkipped: false
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Performance Percentile', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 14,
+                    titleFont: { size: 12, weight: '600' },
+                    bodyFont: { size: 12, weight: '500' },
+                    borderColor: CHART_THEME.border,
+                    borderWidth: 1,
+                    callbacks: { label: (c) => `${c.parsed.y.toFixed(0)}th percentile` }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    max: 100,
+                    grid: { color: CHART_THEME.grid, drawBorder: true, borderColor: CHART_THEME.border },
+                    ticks: { color: CHART_THEME.textMuted, font: { size: 12, weight: '500' }, callback: (v) => v + '%', padding: 10 }
+                },
+                x: {
+                    grid: { display: false, drawBorder: false },
+                    ticks: { color: CHART_THEME.text, font: { size: 12, weight: '600' }, padding: 10 }
+                }
+            }
+        }
+    });
+}
+
+function drawVideoChannelTrendChart(canvas, video, channelVideos) {
+    if (!canvas || !canvas.getContext) return;
+    if (videoChannelTrendChartInstance) {
+        videoChannelTrendChartInstance.destroy();
+    }
+
+    const ctx = canvas.getContext('2d');
+    const hasChannel = Array.isArray(channelVideos) && channelVideos.length > 0;
+
+    if (!hasChannel) {
+        canvas.parentElement.innerHTML = '<p class="placeholder">Load a channel to compare trends</p>';
+        return;
+    }
+
+    const sorted = channelVideos
+        .map(v => ({
+            date: v.published_at ? new Date(v.published_at) : null,
+            views: toNumber(v.views)
+        }))
+        .filter(v => v.date && !Number.isNaN(v.date.getTime()))
+        .sort((a, b) => a.date - b.date);
+
+    if (sorted.length === 0) {
+        canvas.parentElement.innerHTML = '<p class="placeholder">No channel timeline data available</p>';
+        return;
+    }
+
+    const labels = sorted.map(p => p.date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }));
+    const avg = sorted.reduce((s, p) => s + p.views, 0) / sorted.length;
+    const avgLine = sorted.map(() => avg);
+    const videoViews = sorted.map(p => p.views);
+
+    videoChannelTrendChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: 'Channel Views',
+                    data: videoViews,
+                    borderColor: CHART_THEME.brandBlue,
+                    backgroundColor: CHART_THEME.brandBlueLight,
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 2
+                },
+                {
+                    label: 'Channel Average',
+                    data: avgLine,
+                    borderColor: 'rgba(120, 130, 140, 0.9)',
+                    borderDash: [6, 4],
+                    fill: false,
+                    pointRadius: 0
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Trend vs Channel Average', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                legend: { position: 'bottom', labels: { color: CHART_THEME.textMuted, font: { size: 11, weight: '600' } } },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 14,
+                    titleFont: { size: 12, weight: '600' },
+                    bodyFont: { size: 12, weight: '500' },
+                    borderColor: CHART_THEME.border,
+                    borderWidth: 1,
+                    callbacks: { label: (c) => formatNumber(c.parsed.y) + ' views' }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: CHART_THEME.grid, drawBorder: true, borderColor: CHART_THEME.border },
+                    ticks: { color: CHART_THEME.textMuted, font: { size: 12, weight: '500' }, callback: (v) => formatNumber(v), padding: 10 }
+                },
+                x: {
+                    grid: { display: false, drawBorder: false },
+                    ticks: { color: CHART_THEME.text, font: { size: 12, weight: '600' }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }
+                }
+            }
+        }
+    });
+}
+
+function drawVideoVelocityChart(canvas, video) {
+    if (!canvas || !canvas.getContext) return;
+    if (videoVelocityChartInstance) {
+        videoVelocityChartInstance.destroy();
+    }
+
+    const views = toNumber(video.views);
+    const publishedAt = video.published_at ? new Date(video.published_at) : null;
+    if (!publishedAt || Number.isNaN(publishedAt.getTime())) {
+        canvas.parentElement.innerHTML = '<p class="placeholder">Publish date required for velocity</p>';
+        return;
+    }
+
+    const days = Math.max(1, Math.floor((Date.now() - publishedAt.getTime()) / (1000 * 60 * 60 * 24)));
+    const velocity = views / days;
+
+    const ctx = canvas.getContext('2d');
+    videoVelocityChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['Views / Day'],
+            datasets: [{
+                label: 'Velocity',
+                data: [velocity],
+                backgroundColor: CHART_THEME.brandGreenLight,
+                borderColor: CHART_THEME.brandGreen,
+                borderWidth: 2,
+                borderRadius: 10,
+                borderSkipped: false
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Velocity Proxy', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 14,
+                    titleFont: { size: 12, weight: '600' },
+                    bodyFont: { size: 12, weight: '500' },
+                    borderColor: CHART_THEME.border,
+                    borderWidth: 1,
+                    callbacks: { label: (c) => `${formatNumber(Math.round(c.parsed.y))} views/day` }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: CHART_THEME.grid, drawBorder: true, borderColor: CHART_THEME.border },
+                    ticks: { color: CHART_THEME.textMuted, font: { size: 12, weight: '500' }, callback: (v) => formatNumber(v), padding: 10 }
+                },
+                x: {
+                    grid: { display: false, drawBorder: false },
+                    ticks: { color: CHART_THEME.text, font: { size: 12, weight: '600' }, padding: 10 }
+                }
+            }
+        }
+    });
+}
+
+function getSavedBenchmarks() {
+    if (!savedVideos || savedVideos.length === 0) {
+        return { views: 0, likes: 0, comments: 0 };
+    }
+    const views = savedVideos.map(v => toNumber(v.views)).filter(v => v > 0).sort((a, b) => a - b);
+    const likes = savedVideos.map(v => toNumber(v.likes)).filter(v => v > 0).sort((a, b) => a - b);
+    const comments = savedVideos.map(v => toNumber(v.comments)).filter(v => v > 0).sort((a, b) => a - b);
+
+    const median = (arr) => {
+        if (!arr.length) return 0;
+        const mid = Math.floor(arr.length / 2);
+        return arr.length % 2 ? arr[mid] : Math.round((arr[mid - 1] + arr[mid]) / 2);
+    };
+
+    return {
+        views: median(views),
+        likes: median(likes),
+        comments: median(comments)
+    };
+}
+
+function getPerformancePercentile(data) {
+    if (!savedVideos || savedVideos.length === 0) {
+        return { views: 0, likes: 0, comments: 0 };
+    }
+
+    const percentile = (arr, value) => {
+        if (!arr.length) return 0;
+        const below = arr.filter(v => v <= value).length;
+        return Math.round((below / arr.length) * 100);
+    };
+
+    const viewsList = savedVideos.map(v => toNumber(v.views)).filter(v => v > 0);
+    const likesList = savedVideos.map(v => toNumber(v.likes)).filter(v => v > 0);
+    const commentsList = savedVideos.map(v => toNumber(v.comments)).filter(v => v > 0);
+
+    return {
+        views: percentile(viewsList, data.views),
+        likes: percentile(likesList, data.likes),
+        comments: percentile(commentsList, data.comments)
+    };
 }
 
 function drawTopVideosChart(canvas, videos) {
-    const ctx = canvas.getContext('2d');
-    const width = canvas.offsetWidth || 300;
-    const height = canvas.offsetHeight || 200;
-    
-    canvas.width = width;
-    canvas.height = height;
-    
-    const padding = 40;
-    const chartWidth = width - padding * 2;
-    const chartHeight = height - padding * 2;
-    
+    if (topVideosChartInstance) {
+        topVideosChartInstance.destroy();
+    }
+
     if (videos.length === 0) {
-        ctx.fillStyle = '#7f8c8d';
-        ctx.font = '14px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('No video data available', width / 2, height / 2);
+        canvas.parentElement.innerHTML = '<p class="placeholder">No video data available</p>';
         return;
     }
+
+    const topVideos = videos.map(v => ({
+        title: (v.title || 'Video').substring(0, 20),
+        views: toNumber(v.views)
+    })).sort((a, b) => b.views - a.views).slice(0, 8);
+
+    const ctx = canvas.getContext('2d');
     
-    // Get top 5 videos by views
-    const topVideos = videos
-        .map(v => ({
-            title: (v.title || 'Video').substring(0, 12),
-            views: parseInt(v.views) || 0
-        }))
-        .sort((a, b) => b.views - a.views)
-        .slice(0, 5);
-    
-    const maxViews = Math.max(...topVideos.map(v => v.views));
-    const scale = chartHeight / (maxViews || 1);
-    
-    // Background
-    ctx.fillStyle = '#f5f7fa';
-    ctx.fillRect(0, 0, width, height);
-    
-    // Grid lines
-    ctx.strokeStyle = '#ecf0f1';
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) {
-        const y = padding + (chartHeight / 4) * i;
-        ctx.beginPath();
-        ctx.moveTo(padding, y);
-        ctx.lineTo(width - padding, y);
-        ctx.stroke();
-    }
-    
-    // Draw bars
-    const barWidth = chartWidth / topVideos.length;
-    const spacing = 5;
-    
-    topVideos.forEach((vid, i) => {
-        const barHeight = vid.views * scale;
-        const x = padding + (barWidth * i) + spacing;
-        
-        // Gradient color
-        ctx.fillStyle = '#27ae60';
-        ctx.fillRect(x, height - padding - barHeight, barWidth - spacing * 2, barHeight);
-        
-        // Labels
-        ctx.fillStyle = '#2c3e50';
-        ctx.font = '10px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(vid.title, x + (barWidth - spacing * 2) / 2, height - padding + 20);
-        
-        // Values
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 10px sans-serif';
-        if (barHeight > 20) {
-            ctx.fillText(formatNumber(vid.views), x + (barWidth - spacing * 2) / 2, height - padding - barHeight + 15);
+    topVideosChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: topVideos.map(v => v.title),
+            datasets: [{
+                label: 'Views',
+                data: topVideos.map(v => v.views),
+                backgroundColor: CHART_THEME.brandGreenLight,
+                borderColor: CHART_THEME.brandGreen,
+                borderWidth: 2,
+                borderRadius: 10,
+                borderSkipped: false,
+                hoverBackgroundColor: CHART_THEME.brandGreen,
+                hoverBorderWidth: 2.5
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Top Videos by Views', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 14,
+                    titleFont: { size: 13, weight: '600' },
+                    bodyFont: { size: 12, weight: '500' },
+                    borderColor: CHART_THEME.border,
+                    borderWidth: 1,
+                    callbacks: {
+                        label: (c) => formatNumber(c.parsed.y) + ' views',
+                        afterLabel: (c) => {
+                            const t = topVideos.reduce((s, v) => s + v.views, 0);
+                            return t > 0 ? ((c.parsed.y / t) * 100).toFixed(1) + '% of total views' : '';
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: CHART_THEME.grid, drawBorder: true, borderColor: CHART_THEME.border },
+                    ticks: { color: CHART_THEME.textMuted, font: { size: 12, weight: '500' }, callback: (v) => formatNumber(v), padding: 10 }
+                },
+                x: {
+                    grid: { display: false, drawBorder: false },
+                    ticks: { color: CHART_THEME.text, font: { size: 12, weight: '600' }, padding: 10 }
+                }
+            }
         }
     });
+}
+
+function drawCommentsChart(canvas, videos) {
+    if (commentsChartInstance) {
+        commentsChartInstance.destroy();
+    }
+
+    if (videos.length === 0) {
+        canvas.parentElement.innerHTML = '<p class="placeholder">No video data available</p>';
+        return;
+    }
+
+    const topComments = videos.map(v => ({
+        title: (v.title || 'Video').substring(0, 20),
+        comments: toNumber(v.comments)
+    })).sort((a, b) => b.comments - a.comments).slice(0, 8);
+
+    const ctx = canvas.getContext('2d');
+
+    commentsChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: topComments.map(v => v.title),
+            datasets: [{
+                label: 'Comments',
+                data: topComments.map(v => v.comments),
+                backgroundColor: CHART_THEME.brandGoldLight,
+                borderColor: CHART_THEME.brandGold,
+                borderWidth: 2,
+                borderRadius: 10,
+                borderSkipped: false,
+                hoverBackgroundColor: CHART_THEME.brandGold,
+                hoverBorderWidth: 2.5
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Top Commented Videos', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 14,
+                    titleFont: { size: 13, weight: '600' },
+                    bodyFont: { size: 12, weight: '500' },
+                    borderColor: CHART_THEME.border,
+                    borderWidth: 1,
+                    callbacks: { label: (c) => formatNumber(c.parsed.y) + ' comments' }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: CHART_THEME.grid, drawBorder: true, borderColor: CHART_THEME.border },
+                    ticks: { color: CHART_THEME.textMuted, font: { size: 12, weight: '500' }, callback: (v) => formatNumber(v), padding: 10 }
+                },
+                x: {
+                    grid: { display: false, drawBorder: false },
+                    ticks: { color: CHART_THEME.text, font: { size: 12, weight: '600' }, padding: 10 }
+                }
+            }
+        }
+    });
+}
+
+function drawViewsTrendChart(canvas, videos) {
+    if (viewsTrendChartInstance) {
+        viewsTrendChartInstance.destroy();
+    }
+
+    if (videos.length === 0) {
+        canvas.parentElement.innerHTML = '<p class="placeholder">No video data available</p>';
+        return;
+    }
+
+    const points = videos
+        .map(v => ({
+            date: v.published_at ? new Date(v.published_at) : null,
+            views: toNumber(v.views)
+        }))
+        .filter(v => v.date && !Number.isNaN(v.date.getTime()))
+        .sort((a, b) => a.date - b.date);
+
+    if (points.length === 0) {
+        canvas.parentElement.innerHTML = '<p class="placeholder">No timeline data available</p>';
+        return;
+    }
+
+    const labels = points.map(p => p.date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }));
+    const data = points.map(p => p.views);
+
+    const ctx = canvas.getContext('2d');
+
+    viewsTrendChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Views',
+                data,
+                borderColor: CHART_THEME.brandBlue,
+                backgroundColor: CHART_THEME.brandBlueLight,
+                fill: true,
+                tension: 0.35,
+                pointRadius: 3,
+                pointHoverRadius: 5
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Publishing Timeline (Views)', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 14,
+                    titleFont: { size: 13, weight: '600' },
+                    bodyFont: { size: 12, weight: '500' },
+                    borderColor: CHART_THEME.border,
+                    borderWidth: 1,
+                    callbacks: { label: (c) => formatNumber(c.parsed.y) + ' views' }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: CHART_THEME.grid, drawBorder: true, borderColor: CHART_THEME.border },
+                    ticks: { color: CHART_THEME.textMuted, font: { size: 12, weight: '500' }, callback: (v) => formatNumber(v), padding: 10 }
+                },
+                x: {
+                    grid: { display: false, drawBorder: false },
+                    ticks: { color: CHART_THEME.text, font: { size: 12, weight: '600' }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }
+                }
+            }
+        }
+    });
+}
+
+function drawEngagementTrendChart(canvas, videos) {
+    if (engagementTrendChartInstance) {
+        engagementTrendChartInstance.destroy();
+    }
+
+    if (videos.length === 0) {
+        canvas.parentElement.innerHTML = '<p class="placeholder">No video data available</p>';
+        return;
+    }
+
+    const monthly = {};
+    videos.forEach(v => {
+        if (!v.published_at) return;
+        const date = new Date(v.published_at);
+        if (Number.isNaN(date.getTime())) return;
+        const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        const views = toNumber(v.views);
+        const likes = toNumber(v.likes);
+        const comments = toNumber(v.comments);
+        if (!monthly[key]) {
+            monthly[key] = { views: 0, likes: 0, comments: 0 };
+        }
+        monthly[key].views += views;
+        monthly[key].likes += likes;
+        monthly[key].comments += comments;
+    });
+
+    const keys = Object.keys(monthly).sort();
+    if (keys.length === 0) {
+        canvas.parentElement.innerHTML = '<p class="placeholder">No timeline data available</p>';
+        return;
+    }
+
+    const labels = keys.map(k => {
+        const [y, m] = k.split('-');
+        const date = new Date(Number(y), Number(m) - 1, 1);
+        return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+    });
+    const data = keys.map(k => {
+        const row = monthly[k];
+        return row.views > 0 ? ((row.likes + row.comments) / row.views * 100) : 0;
+    });
+
+    const ctx = canvas.getContext('2d');
+    engagementTrendChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Engagement Rate (%)',
+                data,
+                borderColor: CHART_THEME.brandGreen,
+                backgroundColor: CHART_THEME.brandGreenLight,
+                fill: true,
+                tension: 0.35,
+                pointRadius: 3,
+                pointHoverRadius: 5
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Engagement Rate Over Time', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 14,
+                    titleFont: { size: 13, weight: '600' },
+                    bodyFont: { size: 12, weight: '500' },
+                    borderColor: CHART_THEME.border,
+                    borderWidth: 1,
+                    callbacks: { label: (c) => c.parsed.y.toFixed(2) + '%' }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: CHART_THEME.grid, drawBorder: true, borderColor: CHART_THEME.border },
+                    ticks: { color: CHART_THEME.textMuted, font: { size: 12, weight: '500' }, callback: (v) => v + '%', padding: 10 }
+                },
+                x: {
+                    grid: { display: false, drawBorder: false },
+                    ticks: { color: CHART_THEME.text, font: { size: 12, weight: '600' }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }
+                }
+            }
+        }
+    });
+}
+
+function drawCtrProxyChart(canvas, videos) {
+    if (ctrProxyChartInstance) {
+        ctrProxyChartInstance.destroy();
+    }
+
+    if (videos.length === 0) {
+        canvas.parentElement.innerHTML = '<p class="placeholder">No video data available</p>';
+        return;
+    }
+
+    const byRate = videos.map(v => {
+        const views = toNumber(v.views);
+        const likes = toNumber(v.likes);
+        return {
+            title: (v.title || 'Video').substring(0, 18),
+            rate: views > 0 ? (likes / views * 100) : 0
+        };
+    }).sort((a, b) => b.rate - a.rate).slice(0, 8);
+
+    const ctx = canvas.getContext('2d');
+    ctrProxyChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: byRate.map(v => v.title),
+            datasets: [{
+                label: 'Likes per View (%)',
+                data: byRate.map(v => v.rate),
+                backgroundColor: CHART_THEME.brandBlueLight,
+                borderColor: CHART_THEME.brandBlue,
+                borderWidth: 2,
+                borderRadius: 10,
+                borderSkipped: false,
+                hoverBackgroundColor: CHART_THEME.brandBlue,
+                hoverBorderWidth: 2.5
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'CTR Proxy (Likes per View)', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 14,
+                    titleFont: { size: 13, weight: '600' },
+                    bodyFont: { size: 12, weight: '500' },
+                    borderColor: CHART_THEME.border,
+                    borderWidth: 1,
+                    callbacks: { label: (c) => c.parsed.x.toFixed(2) + '%' }
+                }
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    grid: { color: CHART_THEME.grid, drawBorder: true, borderColor: CHART_THEME.border },
+                    ticks: { color: CHART_THEME.textMuted, font: { size: 12, weight: '500' }, callback: (v) => v + '%', padding: 10 }
+                },
+                y: {
+                    grid: { display: false, drawBorder: false },
+                    ticks: { color: CHART_THEME.text, font: { size: 12, weight: '600' }, padding: 10 }
+                }
+            }
+        }
+    });
+}
+
+function drawOutliersChart(canvas, videos) {
+    if (outliersChartInstance) {
+        outliersChartInstance.destroy();
+    }
+
+    if (videos.length === 0) {
+        canvas.parentElement.innerHTML = '<p class="placeholder">No video data available</p>';
+        return;
+    }
+
+    const viewsList = videos.map(v => toNumber(v.views)).filter(v => v > 0).sort((a, b) => a - b);
+    if (viewsList.length === 0) {
+        canvas.parentElement.innerHTML = '<p class="placeholder">No view data available</p>';
+        return;
+    }
+
+    const idx = Math.floor(viewsList.length * 0.95);
+    const threshold = viewsList[Math.min(idx, viewsList.length - 1)];
+
+    let outliers = videos
+        .map(v => ({ title: (v.title || 'Video').substring(0, 20), views: toNumber(v.views) }))
+        .filter(v => v.views >= threshold)
+        .sort((a, b) => b.views - a.views)
+        .slice(0, 8);
+
+    if (outliers.length === 0) {
+        outliers = videos
+            .map(v => ({ title: (v.title || 'Video').substring(0, 20), views: toNumber(v.views) }))
+            .sort((a, b) => b.views - a.views)
+            .slice(0, 3);
+    }
+
+    const ctx = canvas.getContext('2d');
+    outliersChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: outliers.map(v => v.title),
+            datasets: [{
+                label: 'Views',
+                data: outliers.map(v => v.views),
+                backgroundColor: CHART_THEME.brandGoldLight,
+                borderColor: CHART_THEME.brandGold,
+                borderWidth: 2,
+                borderRadius: 10,
+                borderSkipped: false,
+                hoverBackgroundColor: CHART_THEME.brandGold,
+                hoverBorderWidth: 2.5
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Top 5% View Outliers', color: CHART_THEME.text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 14,
+                    titleFont: { size: 13, weight: '600' },
+                    bodyFont: { size: 12, weight: '500' },
+                    borderColor: CHART_THEME.border,
+                    borderWidth: 1,
+                    callbacks: { label: (c) => formatNumber(c.parsed.y) + ' views' }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: CHART_THEME.grid, drawBorder: true, borderColor: CHART_THEME.border },
+                    ticks: { color: CHART_THEME.textMuted, font: { size: 12, weight: '500' }, callback: (v) => formatNumber(v), padding: 10 }
+                },
+                x: {
+                    grid: { display: false, drawBorder: false },
+                    ticks: { color: CHART_THEME.text, font: { size: 12, weight: '600' }, padding: 10 }
+                }
+            }
+        }
+    });
+}
+
+function applyChartTheme() {
+    if (!window.Chart) return;
+    Chart.defaults.font.family = '"IBM Plex Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif';
+    Chart.defaults.color = CHART_THEME.textMuted;
+    Chart.defaults.plugins.legend.labels.usePointStyle = true;
+    Chart.defaults.plugins.legend.labels.boxWidth = 10;
+    Chart.defaults.plugins.legend.labels.boxHeight = 10;
+    Chart.defaults.elements.bar.borderSkipped = false;
+    Chart.defaults.elements.bar.borderRadius = 10;
 }
 
 // ==================== VIDEO MANAGEMENT ====================
@@ -851,6 +1836,8 @@ function loadSavedVideos() {
     if (stored) {
         try {
             savedVideos = JSON.parse(stored);
+            // Populate quick select with saved videos
+            populateQuickVideoSelect(savedVideos);
         } catch (e) {
             savedVideos = [];
         }
@@ -863,81 +1850,41 @@ function addToSavedVideos(videoData) {
     if (!exists) {
         savedVideos.push(videoData);
         saveSavedVideos();
+        // Update quick select box
+        populateQuickVideoSelect(savedVideos);
     }
-}
-
-function populateSavedVideosDropdown() {
-    const select = document.getElementById('saved-video-select');
-    if (!select) return;
-    
-    select.innerHTML = '<option value="">-- Select a video --</option>';
-    
-    if (savedVideos.length === 0) {
-        const option = document.createElement('option');
-        option.value = '';
-        option.text = 'No saved videos. Search for videos first.';
-        option.disabled = true;
-        select.appendChild(option);
-        return;
-    }
-    
-    savedVideos.forEach((video, index) => {
-        const option = document.createElement('option');
-        option.value = index;
-        const title = (video.title || 'Video').substring(0, 40);
-        option.text = `${title} (${formatNumber(video.views)} views)`;
-        select.appendChild(option);
-    });
 }
 
 function loadSelectedSavedVideo() {
-    const select = document.getElementById('saved-video-select');
-    const index = select.value;
-    
-    if (index === '' || !savedVideos[index]) {
-        showToast('Please select a video', 'warning');
+    if (savedVideos.length === 0) {
+        showToast('No saved videos. Search for videos first in the search tab.', 'info');
         return;
     }
     
-    const video = savedVideos[index];
+    // Load the first saved video or the most recent one
+    const video = savedVideos[savedVideos.length - 1];
     displayVideoAnalytics(video);
     
     const resultsDiv = document.getElementById('saved-video-results');
     resultsDiv.style.display = 'block';
 }
 
-function handleAnalyzeChannelVideo() {
-    const select = document.getElementById('channel-videos-select');
-    const index = parseInt(select.value);
-    
-    if (select.value === '' || isNaN(index) || !currentChannelVideos[index]) {
-        showToast('Please select a video from the list', 'warning');
-        return;
+function toNumber(value) {
+    if (value === null || value === undefined) return 0;
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+        if (value.toLowerCase() === 'private') return 0;
+        const parsed = parseFloat(value.replace(/,/g, ''));
+        return Number.isNaN(parsed) ? 0 : parsed;
     }
-    
-    const video = currentChannelVideos[index];
-    
-    // Switch to video analytics tab
-    document.querySelectorAll('.nav-btn').forEach(btn => {
-        btn.classList.remove('active');
-        if (btn.getAttribute('data-section') === 'videos') {
-            btn.classList.add('active');
-        }
-    });
-    
-    showSection('videos');
-    switchVideosView('search');
-    
-    // Display the video analysis
-    displayVideoAnalytics(video);
-    addToSavedVideos(video);
-    document.getElementById('video-results').style.display = 'block';
-    showToast('Video analysis loaded and saved', 'success');
+    return 0;
 }
 
 function formatNumber(num) {
-    if (!num) return '0';
-    const n = parseInt(num);
+    if (num === null || num === undefined) return '0';
+    if (typeof num === 'string' && num.toLowerCase() === 'private') return 'Private';
+    const n = parseInt(num, 10);
+    if (Number.isNaN(n)) return '0';
     if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
     if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
     return n.toString();
