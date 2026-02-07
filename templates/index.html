@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Analytics Pro</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div class="app">
+    <!-- Header/Navigation -->
+    <header class="header">
+        <div class="header-container">
+            <div class="logo">
+                <svg class="logo-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M23 7l-7 5 7 5V7z"></path>
+                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                </svg>
+                <h1>YouTube Analytics Pro</h1>
+            </div>
+            <nav class="nav">
+                <button class="nav-btn" data-section="dashboard">Dashboard</button>
+                <button class="nav-btn" data-section="channels">Channels</button>
+                <button class="nav-btn" data-section="videos">Video Analytics</button>
+                <button class="nav-btn" data-section="settings">Settings</button>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <div class="container">
+            <!-- Dashboard Section -->
+            <section id="dashboard" class="section active">
+                <div class="section-header">
+                    <h2>Dashboard</h2>
+                    <p>Overview of your YouTube analytics data</p>
+                </div>
+
+                <div class="grid-2col">
+                    <div class="card stats-card">
+                        <h3>Total Channels</h3>
+                        <p class="stat-value" id="total-channels">0</p>
+                        <p class="stat-subtext">Channels tracked</p>
+                    </div>
+                    <div class="card stats-card">
+                        <h3>Total Videos Analyzed</h3>
+                        <p class="stat-value" id="total-videos">0</p>
+                        <p class="stat-subtext">Videos in database</p>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Recent Channels</h3>
+                    <div id="recent-channels" class="channels-scroller">
+                        <p class="placeholder">No channels yet. Search for a channel to get started.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Channels Section (Search & Saved Combined) -->
+            <section id="channels" class="section">
+                <div class="section-header">
+                    <h2>Channels</h2>
+                    <p>Search and manage your analyzed channels</p>
+                </div>
+
+                <div class="card">
+                    <div class="view-toggle">
+                        <select id="channels-view-toggle" class="view-select">
+                            <option value="search">Search Channel</option>
+                            <option value="saved">Saved Channels</option>
+                        </select>
+                    </div>
+
+                    <!-- Search View -->
+                    <div id="search-view" class="search-form view-content active-view">
+                        <div class="form-group">
+                            <label>Search Method</label>
+                            <div class="radio-group">
+                                <input type="radio" id="search-by-name" name="search_type" value="name" checked>
+                                <label for="search-by-name">Channel Name</label>
+                                <input type="radio" id="search-by-id" name="search_type" value="id">
+                                <label for="search-by-id">Channel ID</label>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="search-query">Search Query</label>
+                            <input 
+                                type="text" 
+                                id="search-query" 
+                                placeholder="Enter channel name or ID"
+                                class="input-field"
+                            >
+                        </div>
+
+                        <button id="search-btn" class="btn btn-primary">
+                            <span class="btn-icon">🔍</span>
+                            Search Channel
+                        </button>
+
+                        <div id="search-results" class="search-results" style="display: none;">
+                            <h3>Search Results</h3>
+                            <div id="channel-result" class="card"></div>
+                        </div>
+                    </div>
+
+                    <!-- Saved Channels View -->
+                    <div id="saved-view" class="view-content" style="display: none;">
+                        <div id="channels-list" class="channels-grid">
+                            <p class="placeholder">No channels saved yet.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Channel Details View (Modal-like) -->
+            <section id="channel-details" class="section" style="display: none;">
+                <div class="back-btn-container">
+                    <button id="back-btn" class="btn btn-secondary">← Back</button>
+                </div>
+
+                <div class="channel-header card">
+                    <div class="channel-header-content">
+                        <img id="channel-image" src="" alt="Channel" class="channel-thumbnail-large">
+                        <div class="channel-info">
+                            <h2 id="channel-name"></h2>
+                            <p id="channel-id-display" class="channel-id"></p>
+                            <p id="channel-description" class="channel-description"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid-4col">
+                    <div class="card stat-box">
+                        <p class="stat-label">Subscribers</p>
+                        <p class="stat-value-large" id="channel-subscribers">-</p>
+                    </div>
+                    <div class="card stat-box">
+                        <p class="stat-label">Total Views</p>
+                        <p class="stat-value-large" id="channel-views">-</p>
+                    </div>
+                    <div class="card stat-box">
+                        <p class="stat-label">Total Videos</p>
+                        <p class="stat-value-large" id="channel-video-count">-</p>
+                    </div>
+                    <div class="card stat-box">
+                        <p class="stat-label">Engagement Rate</p>
+                        <p class="stat-value-large" id="channel-engagement">-</p>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Channel Videos</h3>
+                    <div style="display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                        <button id="fetch-videos-btn" class="btn btn-accent">
+                            <span class="btn-icon">📹</span>
+                            Fetch Videos
+                        </button>
+                        <div style="flex: 1; min-width: 250px;">
+                            <select id="channel-video-select" class="input-field" style="width: 100%;">
+                                <option value="">-- Select a video to analyze --</option>
+                            </select>
+                        </div>
+                        <button id="analyze-channel-video-btn" class="btn btn-primary">Analyze</button>
+                    </div>
+                    <div id="videos-table" class="table-container" style="margin-top: 20px;">
+                        <table id="videos-data-table">
+                            <thead>
+                                <tr>
+                                    <th>Title</th>
+                                    <th>Views</th>
+                                    <th>Likes</th>
+                                    <th>Comments</th>
+                                    <th>Published</th>
+                                </tr>
+                            </thead>
+                            <tbody id="videos-tbody">
+                                <tr><td colspan="5" class="placeholder">Loading videos...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="grid-2col" style="margin-top: 20px;">
+                    <div class="card">
+                        <h3>Top Videos by Views</h3>
+                        <div id="top-videos-chart" class="chart-container">
+                            <canvas id="top-videos-canvas"></canvas>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h3>Engagement Metrics</h3>
+                        <div id="engagement-chart" class="chart-container">
+                            <canvas id="engagement-canvas"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Settings Section -->
+            <section id="settings" class="section">
+                <div class="section-header">
+                    <h2>Settings</h2>
+                    <p>Application settings and preferences</p>
+                </div>
+
+                <div class="card">
+                    <h3>API Configuration</h3>
+                    <div class="form-group">
+                        <label>API Status</label>
+                        <p id="api-status" class="status-badge">Checking...</p>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Data Management</h3>
+                    <button id="clear-cache-btn" class="btn btn-secondary">Clear Cache</button>
+                    <button id="export-data-btn" class="btn btn-secondary">Export Data</button>
+                </div>
+
+                <div class="card">
+                    <h3>About</h3>
+                    <p><strong>YouTube Analytics Pro</strong></p>
+                    <p>Version: 2.0.0</p>
+                    <p>Backend: FastAPI</p>
+                    <p>Frontend: Vanilla JavaScript</p>
+                    <p>Database: SQLite</p>
+                </div>
+            </section>
+
+            <!-- Video Analytics Section -->
+            <section id="videos" class="section">
+                <div class="section-header">
+                    <h2>Video Analytics</h2>
+                    <p>Analyze individual video performance</p>
+                </div>
+
+                <div class="card">
+                    <div class="view-toggle">
+                        <select id="videos-view-toggle" class="view-select">
+                            <option value="search">Search Video</option>
+                            <option value="saved">Saved Videos</option>
+                        </select>
+                    </div>
+
+                    <!-- Search View -->
+                    <div id="video-search-view" class="search-form view-content active-view">
+                        <div class="form-group">
+                            <label for="video-search-input">Video ID</label>
+                            <input 
+                                type="text" 
+                                id="video-search-input" 
+                                placeholder="Enter YouTube video ID (e.g., dQw4w9WgXcQ)"
+                                class="input-field"
+                            >
+                        </div>
+
+                        <button id="video-search-btn" class="btn btn-primary">
+                            Analyze Video
+                        </button>
+
+                        <div id="video-results" class="search-results" style="display: none;">
+                            <h3>Video Analysis</h3>
+                            <div id="video-details" class="card"></div>
+                        </div>
+                    </div>
+
+                    <!-- Saved Videos View -->
+                    <div id="video-saved-view" class="view-content" style="display: none;">
+                        <div class="form-group">
+                            <label for="saved-video-select">Select Video</label>
+                            <select id="saved-video-select" class="input-field">
+                                <option value="">-- Load a video first --</option>
+                            </select>
+                        </div>
+                        <button id="load-saved-video-btn" class="btn btn-primary">Load Video</button>
+                        
+                        <div id="saved-video-results" class="search-results" style="display: none; margin-top: 2rem;">
+                            <h3>Video Analysis</h3>
+                            <div id="saved-video-details" class="card"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top: 2rem;">
+                    <h3>Video Statistics</h3>
+                    <div class="grid-2col">
+                        <div class="card stat-box">
+                            <p class="stat-label">Views</p>
+                            <p class="stat-value-large" id="video-views">-</p>
+                        </div>
+                        <div class="card stat-box">
+                            <p class="stat-label">Likes</p>
+                            <p class="stat-value-large" id="video-likes">-</p>
+                        </div>
+                        <div class="card stat-box">
+                            <p class="stat-label">Comments</p>
+                            <p class="stat-value-large" id="video-comments">-</p>
+                        </div>
+                        <div class="card stat-box">
+                            <p class="stat-label">Engagement Rate</p>
+                            <p class="stat-value-large" id="video-engagement">-</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Engagement Visualization</h3>
+                    <div id="video-engagement-chart" class="chart-container">
+                        <canvas id="video-engagement-canvas"></canvas>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <p>&copy; 2026 YouTube Analytics Pro. Professional YouTube Analytics Platform.</p>
+    </footer>
+
+    <!-- Loading Indicator -->
+    <div id="loading" class="loading-overlay" style="display: none;">
+        <div class="spinner"></div>
+        <p id="loading-text">Processing...</p>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

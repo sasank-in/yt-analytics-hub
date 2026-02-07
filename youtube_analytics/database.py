@@ -60,6 +60,8 @@ class Channel(Base):
             "subscribers": self.subscribers,
             "total_views": self.total_views,
             "total_videos": self.total_videos,
+            "profile_image": self.profile_image,
+            "banner_image": self.banner_image,
             "fetched_at": self.fetched_at
         }
 
