@@ -4,30 +4,37 @@ Provides SQLAlchemy ORM models and database operations for
 managing YouTube channel and video data in PostgreSQL.
 """
 
+import logging
 from sqlalchemy import create_engine, Column, String, DateTime, Text, ForeignKey, Float, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from youtube_analytics.config import DB_URL
-from datetime import datetime
+from datetime import datetime, timezone
 from dateutil import parser as date_parser
+
+logger = logging.getLogger("youtube_analytics.db")
 
 Base = declarative_base()
 
+
+def utcnow() -> datetime:
+    """Timezone-aware UTC now (replacement for deprecated datetime.utcnow)."""
+    return datetime.now(timezone.utc)
+
+
 def parse_datetime(date_input):
-    """Convert ISO format string to Python datetime object"""
+    """Convert ISO format string to Python datetime object."""
     if date_input is None:
         return None
     if isinstance(date_input, datetime):
         return date_input
     if isinstance(date_input, str):
         try:
-            # Parse ISO format string (e.g., '2020-09-15T00:29:10Z')
             return date_parser.isoparse(date_input)
-        except:
+        except (ValueError, TypeError):
             try:
-                # Fallback to basic parsing
                 return datetime.fromisoformat(date_input.replace('Z', '+00:00'))
-            except:
+            except (ValueError, TypeError):
                 return None
     return None
 
@@ -46,9 +53,9 @@ class Channel(Base):
     total_videos = Column(String(50))
     profile_image = Column(String(500))
     banner_image = Column(String(500))
-    fetched_at = Column(DateTime, default=datetime.utcnow)
+    fetched_at = Column(DateTime, default=utcnow)
     last_searched_at = Column(DateTime)
-    
+
     videos = relationship("Video", back_populates="channel", cascade="all, delete-orphan")
     
     def to_dict(self):
@@ -82,9 +89,9 @@ class Video(Base):
     comments = Column(String(50))
     thumbnail = Column(String(500))
     channel_title = Column(String(255))  # Added to track source channel
-    fetched_at = Column(DateTime, default=datetime.utcnow)
+    fetched_at = Column(DateTime, default=utcnow)
     last_searched_at = Column(DateTime)
-    
+
     channel = relationship("Channel", back_populates="videos")
     
     def to_dict(self):
@@ -111,7 +118,7 @@ class ChannelSetting(Base):
 
     channel_id = Column(String(100), ForeignKey("channels.channel_id"), primary_key=True)
     rpm = Column(Float, default=2.0)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=utcnow)
 
 
 class DatabaseManager:
@@ -122,45 +129,35 @@ class DatabaseManager:
         try:
             from youtube_analytics.config import DB_ECHO, DB_URL as config_db_url
             
-            print("Initializing database...")
-            print(f"   URL: {config_db_url}")
-            
+            logger.info("Initializing database (url=%s)", config_db_url)
             self.engine = create_engine(config_db_url, echo=DB_ECHO)
-            
-            # Test connection
-            print(f"   Testing connection...")
+
             with self.engine.connect() as conn:
                 pass
-            print("   Connection successful")
-            
-            # Create tables
-            print(f"   Creating tables...")
-            Base.metadata.create_all(self.engine)
-            print("   Tables ready")
+            logger.debug("Database connection ok")
 
-            # Lightweight migration: add last_searched_at if missing
-            with self.engine.connect() as conn:
-                try:
-                    cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(channels)").fetchall()]
-                    if "last_searched_at" not in cols:
-                        conn.exec_driver_sql("ALTER TABLE channels ADD COLUMN last_searched_at DATETIME")
-                except Exception:
-                    pass
-                try:
-                    cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(videos)").fetchall()]
-                    if "last_searched_at" not in cols:
-                        conn.exec_driver_sql("ALTER TABLE videos ADD COLUMN last_searched_at DATETIME")
-                except Exception:
-                    pass
-            
+            Base.metadata.create_all(self.engine)
+            logger.debug("Tables ready")
+
+            # Lightweight migration (SQLite-only): add last_searched_at if missing.
+            if self.engine.dialect.name == "sqlite":
+                with self.engine.connect() as conn:
+                    for table in ("channels", "videos"):
+                        try:
+                            cols = [row[1] for row in conn.exec_driver_sql(
+                                f"PRAGMA table_info({table})"
+                            ).fetchall()]
+                            if "last_searched_at" not in cols:
+                                conn.exec_driver_sql(
+                                    f"ALTER TABLE {table} ADD COLUMN last_searched_at DATETIME"
+                                )
+                        except Exception:
+                            logger.exception("Migration check failed for table %s", table)
+
             self.Session = sessionmaker(bind=self.engine)
-            print("Database initialized successfully\n")
-        except Exception as e:
-            print("\nDATABASE INITIALIZATION FAILED")
-            print(f"   Error: {str(e)}")
-            print(f"   URL: {config_db_url}")
-            import traceback
-            traceback.print_exc()
+            logger.info("Database initialized successfully")
+        except Exception:
+            logger.exception("Database initialization failed (url=%s)", config_db_url)
             raise
     
     def add_channel(self, channel_data):
@@ -174,8 +171,7 @@ class DatabaseManager:
             # Convert datetime strings to Python datetime objects
             if 'published_at' in filtered_data and filtered_data['published_at']:
                 filtered_data['published_at'] = parse_datetime(filtered_data['published_at'])
-            filtered_data['last_searched_at'] = datetime.utcnow()
-            filtered_data['last_searched_at'] = datetime.utcnow()
+            filtered_data['last_searched_at'] = utcnow()
             
             channel = session.query(Channel).filter_by(channel_id=channel_data["channel_id"]).first()
             
@@ -189,12 +185,12 @@ class DatabaseManager:
                 session.add(channel)
             
             session.commit()
-            session.refresh(channel)  # Refresh to get the updated timestamp
-            print(f"Channel saved: {channel_data['title']}")
+            session.refresh(channel)
+            logger.info("Channel saved: %s", channel_data['title'])
             return {"success": True, "message": f"Channel '{channel_data['title']}' saved/updated"}
         except Exception as e:
             session.rollback()
-            print(f"Channel save error: {str(e)} | Data keys: {list(channel_data.keys())}")
+            logger.exception("Channel save error (keys=%s)", list(channel_data.keys()))
             return {"success": False, "error": str(e)}
         finally:
             session.close()
@@ -211,6 +207,7 @@ class DatabaseManager:
             # Convert datetime strings to Python datetime objects
             if 'published_at' in filtered_data and filtered_data['published_at']:
                 filtered_data['published_at'] = parse_datetime(filtered_data['published_at'])
+            filtered_data['last_searched_at'] = utcnow()
             
             video = session.query(Video).filter_by(video_id=video_data["video_id"]).first()
             
@@ -228,7 +225,7 @@ class DatabaseManager:
             return {"success": True, "message": f"Video '{video_data['title']}' saved/updated"}
         except Exception as e:
             session.rollback()
-            print(f"Video save error: {str(e)} | Data: {video_data}")
+            logger.exception("Video save error (video_id=%s)", video_data.get("video_id"))
             return {"success": False, "error": str(e)}
         finally:
             session.close()
@@ -259,38 +256,28 @@ class DatabaseManager:
                 func.coalesce(Channel.last_searched_at, Channel.fetched_at).desc()
             ).all()
             result = [channel.to_dict() for channel in channels]
-            if result:
-                print(f"Retrieved {len(result)} channel(s) from database")
-            else:
-                print("No channels found in database")
+            logger.debug("Retrieved %d channel(s) from database", len(result))
             return result
-        except Exception as e:
-            print(f"Error fetching channels: {str(e)}")
-            import traceback
-            traceback.print_exc()
+        except Exception:
+            logger.exception("Error fetching channels")
             return []
         finally:
             session.close()
-    
+
     def get_channel_videos(self, channel_id):
         """Get all videos of a channel"""
         session = self.Session()
         try:
             videos = session.query(Video).filter_by(channel_id=channel_id).all()
             result = [video.to_dict() for video in videos]
-            if result:
-                print(f"Retrieved {len(result)} video(s) for channel {channel_id}")
-            else:
-                print(f"No videos found for channel: {channel_id}")
+            logger.debug("Retrieved %d video(s) for channel %s", len(result), channel_id)
             return result
-        except Exception as e:
-            print(f"Error fetching videos: {str(e)}")
-            import traceback
-            traceback.print_exc()
+        except Exception:
+            logger.exception("Error fetching videos for channel %s", channel_id)
             return []
         finally:
             session.close()
-    
+
     def delete_channel(self, channel_id):
         """Delete channel and its videos"""
         session = self.Session()
@@ -305,21 +292,29 @@ class DatabaseManager:
         finally:
             session.close()
 
+    def delete_channel_videos(self, channel_id):
+        """Delete all videos for a channel"""
+        session = self.Session()
+        try:
+            session.query(Video).filter_by(channel_id=channel_id).delete()
+            session.commit()
+            return {"success": True, "message": "Channel videos deleted"}
+        except Exception as e:
+            session.rollback()
+            return {"success": False, "error": str(e)}
+        finally:
+            session.close()
+
     def get_all_videos(self):
         """Get all videos from database"""
         session = self.Session()
         try:
             videos = session.query(Video).all()
             result = [video.to_dict() for video in videos]
-            if result:
-                print(f"Retrieved {len(result)} video(s) from database")
-            else:
-                print("No videos found in database")
+            logger.debug("Retrieved %d video(s) from database", len(result))
             return result
-        except Exception as e:
-            print(f"Error fetching videos: {str(e)}")
-            import traceback
-            traceback.print_exc()
+        except Exception:
+            logger.exception("Error fetching all videos")
             return []
         finally:
             session.close()
@@ -378,7 +373,7 @@ class DatabaseManager:
             setting = session.query(ChannelSetting).filter_by(channel_id=channel_id).first()
             if setting:
                 setting.rpm = rpm
-                setting.updated_at = datetime.utcnow()
+                setting.updated_at = utcnow()
             else:
                 setting = ChannelSetting(channel_id=channel_id, rpm=rpm)
                 session.add(setting)

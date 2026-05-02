@@ -1,17 +1,56 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "youtube-analytics"
-version = "1.0.0"
-description = "YouTube channel and video analytics platform"
+version = "2.0.0"
+description = "Self-hosted YouTube channel and video analytics platform (FastAPI + SQLite)."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "sasank-in" }]
+keywords = ["youtube", "analytics", "fastapi", "dashboard"]
+classifiers = [
+    "Framework :: FastAPI",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "sqlalchemy>=1.4",
+    "python-dateutil>=2.8",
+    "python-dotenv>=1.0",
+    "google-api-python-client>=2.120",
+]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "httpx>=0.27",
     "black>=22.0",
-    "flake8>=4.0",
+    "ruff>=0.4",
 ]
+
+[project.urls]
+Repository = "https://github.com/sasank-in/youtube-analytics"
+
+[tool.setuptools.packages.find]
+include = ["youtube_analytics*"]
+exclude = ["tests*", "scripts*", "data*"]
+
+[tool.setuptools.package-data]
+youtube_analytics = [
+    "static/*",
+    "static/**/*",
+    "templates/*",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"

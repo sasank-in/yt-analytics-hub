@@ -64,7 +64,8 @@ htmlcov/
 Thumbs.db
 
 # Project specific
-data/
+data/*
+!data/.gitkeep
 exports/
 *.csv
 *.xlsx

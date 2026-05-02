@@ -34,8 +34,8 @@ class YouTubeFetcher:
         except Exception as e:
             return {"error": str(e)}
     
-    def get_channel_videos(self, channel_id, max_results=50):
-        """Fetch all videos from a channel"""
+    def get_channel_videos(self, channel_id, max_results=None):
+        """Fetch videos from a channel. If max_results is None, fetch all."""
         try:
             # Get uploads playlist ID
             channel_request = self.youtube.channels().list(
@@ -53,11 +53,11 @@ class YouTubeFetcher:
             videos = []
             next_page_token = None
             
-            while len(videos) < max_results:
+            while True:
                 playlist_request = self.youtube.playlistItems().list(
                     part="snippet",
                     playlistId=uploads_playlist_id,
-                    maxResults=min(50, max_results - len(videos)),
+                    maxResults=min(50, (max_results - len(videos)) if max_results else 50),
                     pageToken=next_page_token
                 )
                 playlist_response = playlist_request.execute()
@@ -85,10 +85,66 @@ class YouTubeFetcher:
                 next_page_token = playlist_response.get('nextPageToken')
                 if not next_page_token:
                     break
+                if max_results and len(videos) >= max_results:
+                    break
             
             # Return empty list if no videos, not error
             return videos if videos else []
         except Exception as e:
+            return {"error": str(e)}
+
+    def get_channel_top_videos(self, channel_id, max_results=50, return_debug=False):
+        """Fetch top videos for a channel using search (order by view count)."""
+        try:
+            videos = []
+            next_page_token = None
+            debug = {
+                "channel_id": channel_id,
+                "max_results": max_results,
+                "pages": 0,
+                "video_ids": 0,
+                "api_errors": []
+            }
+
+            while len(videos) < max_results:
+                search_request = self.youtube.search().list(
+                    part="id",
+                    channelId=channel_id,
+                    type="video",
+                    order="viewCount",
+                    maxResults=min(50, max_results - len(videos)),
+                    pageToken=next_page_token
+                )
+                search_response = search_request.execute()
+                debug["pages"] += 1
+
+                items = search_response.get("items", [])
+                if not items:
+                    break
+
+                video_ids = [item["id"]["videoId"] for item in items if item.get("id", {}).get("videoId")]
+                debug["video_ids"] += len(video_ids)
+                if video_ids:
+                    videos_request = self.youtube.videos().list(
+                        part="snippet,statistics,contentDetails",
+                        id=",".join(video_ids)
+                    )
+                    videos_response = videos_request.execute()
+                    for video in videos_response.get("items", []):
+                        parsed = self._parse_video_response({"items": [video]})
+                        if "error" not in parsed:
+                            videos.append(parsed)
+
+                next_page_token = search_response.get("nextPageToken")
+                if not next_page_token:
+                    break
+
+            if return_debug:
+                return {"videos": videos if videos else [], "debug": debug}
+            return videos if videos else []
+        except Exception as e:
+            if return_debug:
+                return {"error": str(e), "debug": {"channel_id": channel_id, "max_results": max_results}}
             return {"error": str(e)}
     
     def get_channel_by_username(self, username):
