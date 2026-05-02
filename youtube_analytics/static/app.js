@@ -140,6 +140,7 @@ function showSection(sectionId) {
             const input = document.getElementById('video-search-input');
             if (results) results.classList.add('hidden');
             if (input) input.value = '';
+            refreshVideosQuickSelect();
         }
     }
 }
@@ -379,24 +380,44 @@ function populateQuickVideoSelect(videos = null) {
     const select = document.getElementById('quick-video-select');
     if (!select) return;
 
-    // Use passed videos or use saved videos
     const videosToUse = videos || savedVideos;
-    
-    // Clear existing options except first one
+
     while (select.options.length > 1) {
         select.remove(1);
     }
 
-    // Add recent/saved videos to dropdown
     if (videosToUse && videosToUse.length > 0) {
-        videosToUse.slice(0, 8).forEach((video, index) => {
+        videosToUse.slice(0, 12).forEach((video) => {
             const option = document.createElement('option');
             option.value = video.video_id || '';
-            const title = (video.title || 'Video').substring(0, 30);
-            option.text = `🎬 ${title}`;
+            const title = (video.title || 'Video').substring(0, 32);
+            option.text = title;
             select.appendChild(option);
         });
     }
+}
+
+// Merge localStorage saved videos with the top N DB videos (sorted by views desc)
+// so the Videos page dropdown is useful on a fresh browser session.
+async function refreshVideosQuickSelect() {
+    let dbVideos = [];
+    try {
+        const resp = await fetchAPI('/videos');
+        dbVideos = (resp.videos || [])
+            .map(v => ({ ...v, _views: toNumber(v.views) }))
+            .sort((a, b) => b._views - a._views)
+            .slice(0, 12);
+    } catch (e) {
+        // ignore — fall through with whatever we have
+    }
+    const seen = new Set();
+    const merged = [];
+    [...savedVideos, ...dbVideos].forEach(v => {
+        if (!v.video_id || seen.has(v.video_id)) return;
+        seen.add(v.video_id);
+        merged.push(v);
+    });
+    populateQuickVideoSelect(merged);
 }
 
 // ==================== SEARCH ====================
@@ -474,6 +495,7 @@ async function loadSavedChannels() {
         const response = await fetchAPI('/channels');
         allChannels = response.channels || [];
         renderSavedChannels();
+        populateQuickChannelSelect(allChannels);
     } catch (error) {
         showToast('Error loading channels', 'error');
     }
@@ -559,6 +581,8 @@ async function selectChannel(channelId) {
         document.getElementById('channel-id-display').textContent = channel.channel_id;
         document.getElementById('channel-description').textContent = channel.description;
         document.getElementById('channel-image').src = channel.profile_image;
+        const ytLink = document.getElementById('channel-youtube-link');
+        if (ytLink) ytLink.href = `https://www.youtube.com/channel/${encodeURIComponent(channel.channel_id)}`;
         
         // Update stats
         document.getElementById('channel-subscribers').textContent = formatNumber(channel.subscribers);
@@ -734,27 +758,52 @@ function updateNavBadges(channelsCount, videosCount) {
 }
 
 async function clearCache() {
-    if (confirm('This will clear all cached data. Continue?')) {
-        showToast('Cache cleared', 'success');
+    if (!confirm('Clear locally cached video history and per-channel RPM settings? Database data is not affected.')) return;
+    try {
+        localStorage.removeItem('youtube_analytics_saved_videos');
+        localStorage.removeItem('youtube_analytics_channel_rpm');
+        savedVideos = [];
+        populateQuickVideoSelect([]);
+        showToast('Local cache cleared', 'success');
         await loadDashboard();
+    } catch (e) {
+        showToast('Failed to clear cache: ' + e.message, 'error');
     }
 }
 
 async function exportData() {
     try {
-        const channels = await fetchAPI('/channels');
-        const data = JSON.stringify(channels, null, 2);
-        
+        const [channelsResp, videosResp] = await Promise.all([
+            fetchAPI('/channels'),
+            fetchAPI('/videos'),
+        ]);
+        let rpmMap = {};
+        try {
+            rpmMap = JSON.parse(localStorage.getItem('youtube_analytics_channel_rpm') || '{}');
+        } catch (e) { /* ignore */ }
+
+        const bundle = {
+            exported_at: new Date().toISOString(),
+            version: '2.0',
+            channels: channelsResp.channels || [],
+            videos: videosResp.videos || [],
+            rpm_settings: rpmMap,
+        };
+
+        const data = JSON.stringify(bundle, null, 2);
         const blob = new Blob([data], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `youtube-analytics-${Date.now()}.json`;
+        a.download = `youtube-analytics-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
         a.click();
-        
-        showToast('Data exported successfully', 'success');
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        showToast(`Exported ${bundle.channels.length} channels, ${bundle.videos.length} videos`, 'success');
     } catch (error) {
-        showToast('Error exporting data', 'error');
+        showToast('Error exporting data: ' + error.message, 'error');
     }
 }
 
@@ -1008,7 +1057,7 @@ function showToast(message, type = 'info') {
 
 async function handleVideoSearch() {
     const videoId = document.getElementById('video-search-input')?.value?.trim();
-    
+
     if (!videoId) {
         showToast('Please enter a video ID', 'error');
         return;
@@ -1016,46 +1065,26 @@ async function handleVideoSearch() {
 
     showLoading(true);
     try {
+        // 1. In-memory cache (this session)
         const cachedVideo = findLocalVideo(videoId);
         if (cachedVideo) {
-            if (cachedVideo.channel_id) {
-                currentChannelId = cachedVideo.channel_id;
-                await loadChannelRpm(currentChannelId);
-                await loadChannelVideos(currentChannelId);
-            }
-            displayVideoAnalytics(cachedVideo);
-            addToSavedVideos(cachedVideo);
-            document.getElementById('video-results').classList.remove('hidden');
+            await analyzeVideo(cachedVideo);
             showToast('Loaded from local cache', 'success');
             return;
         }
 
+        // 2. Server-side DB
         const localVideo = await fetchVideoFromDb(videoId);
         if (localVideo) {
-            if (localVideo.channel_id) {
-                currentChannelId = localVideo.channel_id;
-                await loadChannelRpm(currentChannelId);
-                await loadChannelVideos(currentChannelId);
-            }
-            displayVideoAnalytics(localVideo);
-            addToSavedVideos(localVideo);
-            document.getElementById('video-results').classList.remove('hidden');
+            await analyzeVideo(localVideo);
             showToast('Loaded from local database', 'success');
             return;
         }
 
+        // 3. YouTube API (saves to DB on hit)
         const response = await fetchAPI(`/video/search?q=${encodeURIComponent(videoId)}`);
-        
         if (response && response.videos && response.videos.length > 0) {
-            const video = response.videos[0];
-            if (video.channel_id) {
-                currentChannelId = video.channel_id;
-                await loadChannelRpm(currentChannelId);
-                await loadChannelVideos(currentChannelId);
-            }
-            displayVideoAnalytics(video);
-            addToSavedVideos(video);
-            document.getElementById('video-results').classList.remove('hidden');
+            await analyzeVideo(response.videos[0]);
             showToast('Video analysis loaded and saved', 'success');
         } else {
             showToast('Video not found', 'error');
@@ -1067,6 +1096,28 @@ async function handleVideoSearch() {
     } finally {
         showLoading(false);
     }
+}
+
+// Renders the analysis for a single video. Pulls minimal channel context
+// (RPM + sibling videos for the trend chart) WITHOUT drawing channel-detail
+// charts, which live on a different section.
+async function analyzeVideo(video) {
+    if (!video) return;
+    if (video.channel_id) {
+        currentChannelId = video.channel_id;
+        loadChannelRpm(currentChannelId);
+        try {
+            const resp = await fetchAPI(`/channel/${currentChannelId}/videos`);
+            currentChannelVideos = resp.videos || [];
+        } catch (e) {
+            currentChannelVideos = [];
+        }
+    } else {
+        currentChannelVideos = [];
+    }
+    displayVideoAnalytics(video);
+    addToSavedVideos(video);
+    document.getElementById('video-results').classList.remove('hidden');
 }
 
 function findLocalChannel(query) {
@@ -1099,37 +1150,21 @@ async function loadVideoFromDbOnly(videoId) {
     if (!id) return;
     showLoading(true, 'Loading saved video...');
     try {
-        const cachedVideo = findLocalVideo(id);
-        if (cachedVideo) {
-            if (cachedVideo.channel_id) {
-                currentChannelId = cachedVideo.channel_id;
-                await loadChannelRpm(currentChannelId);
-                await loadChannelVideos(currentChannelId);
-            }
-            displayVideoAnalytics(cachedVideo);
-            addToSavedVideos(cachedVideo);
-            document.getElementById('video-results').classList.remove('hidden');
+        const cached = findLocalVideo(id);
+        if (cached) {
+            await analyzeVideo(cached);
             showToast('Loaded from local cache', 'success');
             return;
         }
-
-        const localVideo = await fetchVideoFromDb(id);
-        if (localVideo) {
-            if (localVideo.channel_id) {
-                currentChannelId = localVideo.channel_id;
-                await loadChannelRpm(currentChannelId);
-                await loadChannelVideos(currentChannelId);
-            }
-            displayVideoAnalytics(localVideo);
-            addToSavedVideos(localVideo);
-            document.getElementById('video-results').classList.remove('hidden');
+        const fromDb = await fetchVideoFromDb(id);
+        if (fromDb) {
+            await analyzeVideo(fromDb);
             showToast('Loaded from local database', 'success');
             return;
         }
-
         showToast('Video not found in local database', 'error');
     } catch (error) {
-        showToast('Error loading saved video', 'error');
+        showToast('Error loading saved video: ' + error.message, 'error');
     } finally {
         showLoading(false);
     }
@@ -1137,44 +1172,47 @@ async function loadVideoFromDbOnly(videoId) {
 
 function displayVideoAnalytics(video) {
     currentVideoAnalytics = video;
-    currentVideoAnalytics = video;
-    // Show video statistics and chart sections
     document.getElementById('video-stats-section').classList.remove('hidden');
     document.getElementById('video-advanced-charts-section').classList.remove('hidden');
     document.getElementById('video-insights-charts-section').classList.remove('hidden');
     document.getElementById('video-trend-charts-section').classList.remove('hidden');
-    
+
     const views = toNumber(video.views);
     const likes = toNumber(video.likes);
     const comments = toNumber(video.comments);
-    
-    // Calculate engagement rate
-    const engagementRate = views > 0 ? ((likes + comments) / views * 100).toFixed(2) : 0;
-    
-    // Update statistics
+    const engagementRate = views > 0 ? ((likes + comments) / views * 100).toFixed(2) : '0.00';
+
     document.getElementById('video-views').textContent = formatNumber(video.views);
     document.getElementById('video-likes').textContent = formatNumber(video.likes);
     document.getElementById('video-comments').textContent = formatNumber(video.comments);
     document.getElementById('video-engagement').textContent = engagementRate + '%';
-    
-    // Update video details
-    const detailsDiv = document.getElementById('video-details');
-    detailsDiv.innerHTML = `
-        <div class="video-info">
-            <p><strong>Title:</strong> ${video.title || 'N/A'}</p>
-            <p><strong>Video ID:</strong> ${video.video_id || 'N/A'}</p>
-            <p><strong>Published:</strong> ${formatDate(video.published_at)}</p>
-            <p><strong>Description:</strong> ${(video.description || 'No description').substring(0, 200)}...</p>
+
+    const description = video.description || 'No description';
+    const truncated = description.length > 200 ? description.substring(0, 200) + '…' : description;
+    const ytUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(video.video_id || '')}`;
+    document.getElementById('video-details').innerHTML = `
+        <div class="space-y-1.5">
+            <p><span class="font-medium text-slate-900">${video.title || 'Untitled'}</span></p>
+            <p class="text-xs text-slate-500">
+                <code>${video.video_id || 'N/A'}</code>
+                · ${formatDate(video.published_at)}
+                · <a href="${ytUrl}" target="_blank" rel="noopener" class="text-brand-600 hover:underline">Open on YouTube ↗</a>
+            </p>
+            <p class="text-sm text-slate-600">${truncated}</p>
         </div>
     `;
-    
+
+    // Draw the 6 video-detail charts. Chart helpers handle null canvases gracefully.
     const data = { likes, comments, views };
-    window.VideoCharts.drawVideoCompositionChart(document.getElementById('video-composition-canvas'), data);
-    window.VideoCharts.drawVideoBenchmarkChart(document.getElementById('video-benchmark-canvas'), data);
-    window.VideoCharts.drawVideoEngagementRateChart(document.getElementById('video-engagement-rate-canvas'), data);
-    window.VideoCharts.drawVideoPercentileChart(document.getElementById('video-percentile-canvas'), data);
-    window.VideoCharts.drawVideoChannelTrendChart(document.getElementById('video-channel-trend-canvas'), video, currentChannelVideos);
-    window.VideoCharts.drawVideoVelocityChart(document.getElementById('video-velocity-canvas'), video);
+    const drawSafe = (fn, ...args) => {
+        try { fn(...args); } catch (e) { console.warn('Chart draw failed:', e.message); }
+    };
+    drawSafe(window.VideoCharts.drawVideoCompositionChart, document.getElementById('video-composition-canvas'), data);
+    drawSafe(window.VideoCharts.drawVideoBenchmarkChart, document.getElementById('video-benchmark-canvas'), data);
+    drawSafe(window.VideoCharts.drawVideoEngagementRateChart, document.getElementById('video-engagement-rate-canvas'), data);
+    drawSafe(window.VideoCharts.drawVideoPercentileChart, document.getElementById('video-percentile-canvas'), data);
+    drawSafe(window.VideoCharts.drawVideoChannelTrendChart, document.getElementById('video-channel-trend-canvas'), video, currentChannelVideos);
+    drawSafe(window.VideoCharts.drawVideoVelocityChart, document.getElementById('video-velocity-canvas'), video);
 }
 
 function applyChartTheme() {

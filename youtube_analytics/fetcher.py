@@ -4,9 +4,31 @@ Provides functionality to fetch YouTube channel and video data
 using the official YouTube Data API v3.
 """
 
+import json
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from youtube_analytics.config import YOUTUBE_API_KEY
+
+
+def _humanize_error(exc: Exception) -> str:
+    """Turn a verbose HttpError stack-trace string into a short user-friendly message."""
+    if isinstance(exc, HttpError):
+        try:
+            payload = json.loads(exc.content.decode("utf-8"))
+            err = payload.get("error", {})
+            msg = err.get("message") or err.get("status") or str(exc)
+            # Common cases
+            low = msg.lower()
+            if "api key not valid" in low:
+                return "YouTube API key is invalid. Check YOUTUBE_API_KEY in .env."
+            if "quota" in low:
+                return "YouTube API daily quota exceeded. Try again tomorrow or lower TOP_VIDEOS_LIMIT."
+            if "video not found" in low or "not found" in low:
+                return "Video or channel not found on YouTube."
+            return msg
+        except Exception:
+            pass
+    return str(exc)
 
 
 class YouTubeFetcher:
@@ -32,7 +54,7 @@ class YouTubeFetcher:
             response = request.execute()
             return self._parse_response(response)
         except Exception as e:
-            return {"error": str(e)}
+            return {"error": _humanize_error(e)}
     
     def get_channel_videos(self, channel_id, max_results=None):
         """Fetch videos from a channel. If max_results is None, fetch all."""
@@ -91,7 +113,7 @@ class YouTubeFetcher:
             # Return empty list if no videos, not error
             return videos if videos else []
         except Exception as e:
-            return {"error": str(e)}
+            return {"error": _humanize_error(e)}
 
     def get_channel_top_videos(self, channel_id, max_results=50, return_debug=False):
         """Fetch top videos for a channel using search (order by view count)."""
@@ -144,8 +166,8 @@ class YouTubeFetcher:
             return videos if videos else []
         except Exception as e:
             if return_debug:
-                return {"error": str(e), "debug": {"channel_id": channel_id, "max_results": max_results}}
-            return {"error": str(e)}
+                return {"error": _humanize_error(e), "debug": {"channel_id": channel_id, "max_results": max_results}}
+            return {"error": _humanize_error(e)}
     
     def get_channel_by_username(self, username):
         """Fetch channel data by username"""
@@ -157,7 +179,7 @@ class YouTubeFetcher:
             response = request.execute()
             return self._parse_response(response)
         except Exception as e:
-            return {"error": str(e)}
+            return {"error": _humanize_error(e)}
     
     def get_channel_by_name(self, channel_name):
         """Fetch channel data by searching channel name"""
@@ -176,7 +198,7 @@ class YouTubeFetcher:
             else:
                 return {"error": f"Channel '{channel_name}' not found"}
         except Exception as e:
-            return {"error": str(e)}
+            return {"error": _humanize_error(e)}
     
     def get_video_by_id(self, video_id):
         """Fetch video data by video ID"""
@@ -188,7 +210,7 @@ class YouTubeFetcher:
             response = request.execute()
             return self._parse_video_response(response)
         except Exception as e:
-            return {"error": str(e)}
+            return {"error": _humanize_error(e)}
     
     def get_video_by_title(self, title, channel_id=None):
         """Fetch video data by searching video title"""
@@ -211,7 +233,7 @@ class YouTubeFetcher:
             else:
                 return {"error": f"Video '{title}' not found"}
         except Exception as e:
-            return {"error": str(e)}
+            return {"error": _humanize_error(e)}
     
     def _parse_response(self, response):
         """Parse and format channel API response"""
