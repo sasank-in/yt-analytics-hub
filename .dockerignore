@@ -1,0 +1,44 @@
+# Version control
+.git
+.gitignore
+.github
+
+# Python artefacts
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.ruff_cache
+*.egg-info
+build
+dist
+
+# Virtualenvs
+venv
+.venv
+env
+ENV
+
+# Local config
+.env
+.env.local
+.env.*.local
+
+# Data (mounted as a volume in compose)
+data/*.db
+data/*.sqlite
+
+# IDE
+.idea
+.vscode
+*.swp
+.DS_Store
+
+# Tests / docs (not needed at runtime)
+tests
+docs
+README.md
+*.md
+!README.md
+scripts

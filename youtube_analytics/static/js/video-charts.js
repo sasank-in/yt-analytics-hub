@@ -1,151 +1,178 @@
+/**
+ * Video-detail charts.
+ *
+ * Honest-analytics rewrite:
+ *   - Benchmark: now compares against the SAME CHANNEL's other videos (was
+ *     previously the user's localStorage history, which mixed unrelated
+ *     channels into a meaningless median)
+ *   - Velocity: shows actual since-publish rates (per day, per week, lifetime)
+ *     INSTEAD of linearly extrapolating cumulative views into a fictional
+ *     "per year" projection
+ *   - Trend vs Channel: shows channel videos as a scatter of (publish date,
+ *     views) and highlights the current video, instead of forcing two series
+ *     onto the same line with null-gaps that zig-zag through publish dates
+ *   - Composition: views removed from the doughnut (it was 1000× the others
+ *     so the chart was effectively one slice); now only shows likes vs comments
+ */
 (function () {
-    const state = window.VideoChartsState || (window.VideoChartsState = {});
+    'use strict';
 
-    function theme() {
-        return window.CHART_THEME;
+    const state = window.VideoChartsState || (window.VideoChartsState = {});
+    const theme = () => window.CHART_THEME;
+    const A = () => window.Analytics;
+
+    function placeholder(canvas, msg) {
+        canvas.parentElement.innerHTML = `<p class="placeholder">${msg}</p>`;
     }
 
+    // ---------------------------------------------------------------------
+    // Engagement composition: likes vs comments only.
+    //
+    // The original chart included views in the doughnut, but views are
+    // typically 100–1000× larger than likes/comments, so the doughnut showed
+    // a single slice. Now it shows the like/comment split — the actual
+    // "engagement composition" most readers expect.
+    // ---------------------------------------------------------------------
     function drawVideoCompositionChart(canvas, data) {
         if (!canvas || !canvas.getContext) return;
-        if (state.videoCompositionChartInstance) {
-            state.videoCompositionChartInstance.destroy();
-        }
+        if (state.videoCompositionChartInstance) state.videoCompositionChartInstance.destroy();
 
-        const total = data.views + data.likes + data.comments;
-        const ctx = canvas.getContext('2d');
-        state.videoCompositionChartInstance = new Chart(ctx, {
+        const likes = window.toNumber(data.likes);
+        const comments = window.toNumber(data.comments);
+        const total = likes + comments;
+
+        if (total === 0) return placeholder(canvas, 'No likes or comments to display');
+
+        state.videoCompositionChartInstance = new Chart(canvas.getContext('2d'), {
             type: 'doughnut',
             data: {
-                labels: ['Views', 'Likes', 'Comments'],
+                labels: ['Likes', 'Comments'],
                 datasets: [{
-                    data: [data.views, data.likes, data.comments],
-                    backgroundColor: [
-                        'rgba(15, 76, 129, 0.85)',
-                        'rgba(31, 122, 85, 0.85)',
-                        'rgba(176, 135, 74, 0.85)'
-                    ],
+                    data: [likes, comments],
+                    backgroundColor: ['rgba(31, 122, 85, 0.85)', 'rgba(176, 135, 74, 0.85)'],
                     borderColor: theme().border,
-                    borderWidth: 1.5
-                }]
+                    borderWidth: 1.5,
+                }],
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    title: { display: true, text: 'Engagement Composition', color: theme().text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
-                    legend: { position: 'bottom', labels: { color: theme().textMuted, font: { size: 11, weight: '600' } } },
-                    tooltip: {
-                        enabled: true,
-                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                        padding: 14,
-                        titleFont: { size: 12, weight: '600' },
-                        bodyFont: { size: 12, weight: '500' },
-                        borderColor: theme().border,
-                        borderWidth: 1,
-                        callbacks: {
-                            label: (c) => {
-                                const pct = total > 0 ? ((c.parsed / total) * 100).toFixed(1) : '0.0';
-                                return `${window.formatNumber(c.parsed)} (${pct}%)`;
-                            }
-                        }
-                    }
-                }
-            }
+                    title: chartTitle('Engagement Composition'),
+                    subtitle: chartSubtitle('Likes vs comments • views excluded (different scale)'),
+                    legend: { position: 'bottom', labels: legendLabelStyle() },
+                    tooltip: tooltipDefaults({
+                        body: (c) => {
+                            const pct = ((c.parsed / total) * 100).toFixed(1);
+                            return `${window.formatNumber(c.parsed)} (${pct}%)`;
+                        },
+                    }),
+                },
+            },
         });
     }
 
-    function drawVideoBenchmarkChart(canvas, data) {
+    // ---------------------------------------------------------------------
+    // Benchmark: compare to the SAME CHANNEL's other videos.
+    //
+    // The third arg `channelVideos` is now load-bearing — without it we have
+    // no honest baseline. Falls back to a "no benchmark" placeholder.
+    // ---------------------------------------------------------------------
+    function drawVideoBenchmarkChart(canvas, data, channelVideos) {
         if (!canvas || !canvas.getContext) return;
-        if (state.videoBenchmarkChartInstance) {
-            state.videoBenchmarkChartInstance.destroy();
+        if (state.videoBenchmarkChartInstance) state.videoBenchmarkChartInstance.destroy();
+
+        // Only use sibling videos that aren't the one we're analyzing.
+        const siblings = (channelVideos || []).filter(
+            (v) => v && v.video_id && v.video_id !== data.video_id,
+        );
+
+        if (siblings.length < 3) {
+            return placeholder(canvas, 'Need ≥3 sibling videos in DB for a fair benchmark');
         }
 
-        const benchmarks = window.getSavedBenchmarks();
+        const viewsList = siblings.map((v) => window.toNumber(v.views));
+        const likesList = siblings.map((v) => window.toNumber(v.likes));
+        const commentsList = siblings.map((v) => window.toNumber(v.comments));
+
+        const medianViews = A().median(viewsList);
+        const medianLikes = A().median(likesList);
+        const medianComments = A().median(commentsList);
+
         const metrics = [
-            { key: 'views', label: 'Views', value: data.views, median: benchmarks.views },
-            { key: 'likes', label: 'Likes', value: data.likes, median: benchmarks.likes },
-            { key: 'comments', label: 'Comments', value: data.comments, median: benchmarks.comments }
+            { label: 'Views', value: data.views, median: medianViews },
+            { label: 'Likes', value: data.likes, median: medianLikes },
+            { label: 'Comments', value: data.comments, median: medianComments },
         ];
-        const relative = metrics.map(m => (m.median > 0 ? (m.value / m.median) * 100 : 0));
-        const ctx = canvas.getContext('2d');
-        state.videoBenchmarkChartInstance = new Chart(ctx, {
+        const relative = metrics.map((m) => (m.median > 0 ? (m.value / m.median) * 100 : 0));
+
+        state.videoBenchmarkChartInstance = new Chart(canvas.getContext('2d'), {
             type: 'bar',
             data: {
-                labels: metrics.map(m => m.label),
-                datasets: [{
-                    label: 'Relative to Median (%)',
-                    data: relative,
-                    backgroundColor: [theme().brandBlueLight, theme().brandGreenLight, theme().brandGoldLight],
-                    borderColor: [theme().brandBlue, theme().brandGreen, theme().brandGold],
-                    borderWidth: 2,
-                    borderRadius: 10,
-                    borderSkipped: false
-                }, {
-                    label: 'Median Baseline (100%)',
-                    data: metrics.map(() => 100),
-                    type: 'line',
-                    borderColor: 'rgba(120, 130, 140, 0.9)',
-                    borderDash: [6, 4],
-                    borderWidth: 2,
-                    pointRadius: 0,
-                    fill: false
-                }]
+                labels: metrics.map((m) => m.label),
+                datasets: [
+                    {
+                        label: 'This video vs channel median',
+                        data: relative,
+                        backgroundColor: [theme().brandBlueLight, theme().brandGreenLight, theme().brandGoldLight],
+                        borderColor: [theme().brandBlue, theme().brandGreen, theme().brandGold],
+                        borderWidth: 2,
+                        borderRadius: 6,
+                        borderSkipped: false,
+                    },
+                    {
+                        label: 'Channel median (100%)',
+                        data: metrics.map(() => 100),
+                        type: 'line',
+                        borderColor: 'rgba(120, 130, 140, 0.9)',
+                        borderDash: [6, 4],
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        fill: false,
+                    },
+                ],
             },
             options: {
                 indexAxis: 'y',
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    title: { display: true, text: 'Benchmark vs Saved Videos', color: theme().text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
-                    subtitle: { display: true, text: 'Relative performance vs saved median (100% baseline)', color: theme().textMuted, font: { size: 11, weight: '500' }, padding: { bottom: 8 } },
-                    legend: { position: 'bottom', labels: { color: theme().textMuted, font: { size: 11, weight: '600' } } },
-                    tooltip: {
-                        enabled: true,
-                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                        padding: 14,
-                        titleFont: { size: 12, weight: '600' },
-                        bodyFont: { size: 12, weight: '500' },
-                        borderColor: theme().border,
-                        borderWidth: 1,
-                        callbacks: {
-                            label: (c) => {
-                                const idx = c.dataIndex;
-                                const metric = metrics[idx];
-                                const rel = relative[idx];
-                                return `${metric.label}: ${window.formatNumber(metric.value)} vs ${window.formatNumber(metric.median)} (${rel.toFixed(0)}%)`;
-                            }
-                        }
-                    }
+                    title: chartTitle('Benchmark vs Channel Siblings'),
+                    subtitle: chartSubtitle(`Compared to median of ${siblings.length} other videos in this channel`),
+                    legend: { position: 'bottom', labels: legendLabelStyle() },
+                    tooltip: tooltipDefaults({
+                        body: (c) => {
+                            const idx = c.dataIndex;
+                            const m = metrics[idx];
+                            const rel = relative[idx];
+                            return `${m.label}: ${window.formatNumber(m.value)} vs ${window.formatNumber(m.median)} (${rel.toFixed(0)}%)`;
+                        },
+                    }),
                 },
                 scales: {
-                    x: {
-                        beginAtZero: true,
-                        grid: { color: theme().grid, drawBorder: true, borderColor: theme().border },
-                        ticks: { color: theme().textMuted, font: { size: 12, weight: '500' }, callback: (v) => v + '%', padding: 10 }
-                    },
-                    y: {
-                        grid: { display: false, drawBorder: false },
-                        ticks: { color: theme().text, font: { size: 12, weight: '600' }, padding: 10 }
-                    }
-                }
-            }
+                    x: { ...numericAxis(), ticks: { ...numericAxis().ticks, callback: (v) => `${v}%` } },
+                    y: { grid: { display: false }, ticks: labelTickStyle() },
+                },
+            },
         });
     }
 
+    // ---------------------------------------------------------------------
+    // Engagement rate breakdown — radar of engagement / like rate / comment rate.
+    // (Like-rate + comment-rate ≈ engagement rate, but seeing both components
+    // and the total is genuinely useful.)
+    // ---------------------------------------------------------------------
     function drawVideoEngagementRateChart(canvas, data) {
         if (!canvas || !canvas.getContext) return;
-        if (state.videoEngagementRateChartInstance) {
-            state.videoEngagementRateChartInstance.destroy();
-        }
+        if (state.videoEngagementRateChartInstance) state.videoEngagementRateChartInstance.destroy();
 
-        const engagementRate = data.views > 0 ? ((data.likes + data.comments) / data.views) * 100 : 0;
-        const likeRate = data.views > 0 ? (data.likes / data.views) * 100 : 0;
-        const commentRate = data.views > 0 ? (data.comments / data.views) * 100 : 0;
+        const engagementRate = A().engagementRate(data);
+        const likeRate = A().likeRate(data);
+        const commentRate = A().commentRate(data);
         const maxRate = Math.max(engagementRate, likeRate, commentRate);
         const scaleMax = Math.max(1, Math.ceil(maxRate * 1.2));
 
-        const ctx = canvas.getContext('2d');
-        state.videoEngagementRateChartInstance = new Chart(ctx, {
+        state.videoEngagementRateChartInstance = new Chart(canvas.getContext('2d'), {
             type: 'radar',
             data: {
                 labels: ['Engagement', 'Like Rate', 'Comment Rate'],
@@ -158,25 +185,19 @@
                     borderWidth: 2,
                     pointRadius: 3,
                     pointHoverRadius: 5,
-                    fill: true
-                }]
+                    fill: true,
+                }],
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    title: { display: true, text: 'Engagement Rate Breakdown', color: theme().text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                    title: chartTitle('Engagement Rate Breakdown'),
+                    subtitle: chartSubtitle('All metrics as % of views'),
                     legend: { display: false },
-                    tooltip: {
-                        enabled: true,
-                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                        padding: 14,
-                        titleFont: { size: 12, weight: '600' },
-                        bodyFont: { size: 12, weight: '500' },
-                        borderColor: theme().border,
-                        borderWidth: 1,
-                        callbacks: { label: (c) => (c.parsed.r || 0).toFixed(2) + '%' }
-                    }
+                    tooltip: tooltipDefaults({
+                        body: (c) => `${(c.parsed.r || 0).toFixed(2)}%`,
+                    }),
                 },
                 scales: {
                     r: {
@@ -185,26 +206,26 @@
                         grid: { color: theme().grid },
                         angleLines: { color: theme().grid },
                         pointLabels: { color: theme().text, font: { size: 11, weight: '600' } },
-                        ticks: { color: theme().textMuted, font: { size: 11, weight: '500' }, callback: (v) => v + '%' }
-                    }
-                }
-            }
+                        ticks: { color: theme().textMuted, font: { size: 11, weight: '500' }, callback: (v) => `${v}%` },
+                    },
+                },
+            },
         });
     }
 
+    // ---------------------------------------------------------------------
+    // Engagement efficiency: per-1k normalised metrics. Honest as-is.
+    // ---------------------------------------------------------------------
     function drawVideoPercentileChart(canvas, data) {
         if (!canvas || !canvas.getContext) return;
-        if (state.videoPercentileChartInstance) {
-            state.videoPercentileChartInstance.destroy();
-        }
+        if (state.videoPercentileChartInstance) state.videoPercentileChartInstance.destroy();
 
-        const views = Math.max(1, data.views);
-        const likesPer1k = (data.likes / views) * 1000;
-        const commentsPer1k = (data.comments / views) * 1000;
-        const engagementPct = ((data.likes + data.comments) / views) * 100;
+        const views = Math.max(1, window.toNumber(data.views));
+        const likesPer1k = (window.toNumber(data.likes) / views) * 1000;
+        const commentsPer1k = (window.toNumber(data.comments) / views) * 1000;
+        const engagementPct = A().engagementRate(data);
 
-        const ctx = canvas.getContext('2d');
-        state.videoPercentileChartInstance = new Chart(ctx, {
+        state.videoPercentileChartInstance = new Chart(canvas.getContext('2d'), {
             type: 'bar',
             data: {
                 labels: ['Likes / 1K', 'Comments / 1K', 'Engagement %'],
@@ -214,274 +235,286 @@
                     backgroundColor: [theme().brandGreenLight, theme().brandGoldLight, theme().brandBlueLight],
                     borderColor: [theme().brandGreen, theme().brandGold, theme().brandBlue],
                     borderWidth: 2,
-                    borderRadius: 10,
-                    borderSkipped: false
-                }]
+                    borderRadius: 6,
+                    borderSkipped: false,
+                }],
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    title: { display: true, text: 'Engagement Efficiency', color: theme().text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
-                    subtitle: { display: true, text: 'Rates normalized per 1,000 views', color: theme().textMuted, font: { size: 11, weight: '500' }, padding: { bottom: 8 } },
+                    title: chartTitle('Engagement Efficiency'),
+                    subtitle: chartSubtitle('Rates normalized per 1,000 views'),
                     legend: { display: false },
-                    tooltip: {
-                        enabled: true,
-                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                        padding: 14,
-                        titleFont: { size: 12, weight: '600' },
-                        bodyFont: { size: 12, weight: '500' },
-                        borderColor: theme().border,
-                        borderWidth: 1,
-                        callbacks: {
-                            label: (c) => {
-                                const label = c.label.includes('%') ? `${c.parsed.y.toFixed(2)}%` : `${c.parsed.y.toFixed(2)}`;
-                                return `${c.label}: ${label}`;
-                            }
-                        }
-                    }
+                    tooltip: tooltipDefaults({
+                        body: (c) => {
+                            const isPct = c.label.includes('%');
+                            return `${c.label}: ${c.parsed.y.toFixed(2)}${isPct ? '%' : ''}`;
+                        },
+                    }),
                 },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        grid: { color: theme().grid, drawBorder: true, borderColor: theme().border },
-                        ticks: { color: theme().textMuted, font: { size: 12, weight: '500' }, padding: 10 }
-                    },
-                    x: {
-                        grid: { display: false, drawBorder: false },
-                        ticks: { color: theme().text, font: { size: 12, weight: '600' }, padding: 10 }
-                    }
-                }
-            }
+                scales: { y: numericAxis(), x: { grid: { display: false }, ticks: labelTickStyle() } },
+            },
         });
     }
 
+    // ---------------------------------------------------------------------
+    // Channel sibling scatter — replaces the broken zig-zag line.
+    //
+    // x = lifetime views, y = engagement %, one dot per sibling video.
+    // Current video shown in highlight color so the user can immediately see
+    // where it sits in the channel's distribution. No misleading line.
+    // ---------------------------------------------------------------------
     function drawVideoChannelTrendChart(canvas, video, channelVideos) {
         if (!canvas || !canvas.getContext) return;
-        if (state.videoChannelTrendChartInstance) {
-            state.videoChannelTrendChartInstance.destroy();
+        if (state.videoChannelTrendChartInstance) state.videoChannelTrendChartInstance.destroy();
+
+        const siblings = (channelVideos || []).filter(
+            (v) => v && v.video_id && v.video_id !== video?.video_id,
+        );
+
+        if (siblings.length === 0) {
+            return placeholder(canvas, 'No sibling videos in DB to compare against');
         }
 
-        const ctx = canvas.getContext('2d');
-        const points = [];
+        const toPoint = (v) => {
+            const views = window.toNumber(v.views);
+            return {
+                x: Math.max(views, 1),
+                y: A().engagementRate({ likes: v.likes, comments: v.comments, views }),
+                title: v.title || 'Video',
+                views,
+            };
+        };
 
-        if (Array.isArray(channelVideos) && channelVideos.length > 0) {
-            channelVideos.forEach(v => {
-                const date = v.published_at ? new Date(v.published_at) : null;
-                if (!date || Number.isNaN(date.getTime())) return;
-                points.push({ date, views: window.toNumber(v.views), isCurrent: false });
+        const siblingPoints = siblings.map(toPoint);
+        const currentPoint = video ? toPoint(video) : null;
+
+        const medianViews = A().median(siblingPoints.map((p) => p.x));
+        const medianEng = A().median(siblingPoints.map((p) => p.y));
+
+        const datasets = [
+            {
+                label: `Channel videos (n=${siblingPoints.length})`,
+                data: siblingPoints,
+                backgroundColor: theme().brandBlueLight,
+                borderColor: theme().brandBlue,
+                borderWidth: 1.5,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+            },
+        ];
+        if (currentPoint) {
+            datasets.push({
+                label: 'This video',
+                data: [currentPoint],
+                backgroundColor: theme().brandGold,
+                borderColor: theme().brandGold,
+                pointRadius: 8,
+                pointHoverRadius: 10,
+                pointStyle: 'rectRounded',
             });
         }
 
-        const currentDate = video?.published_at ? new Date(video.published_at) : null;
-        if (currentDate && !Number.isNaN(currentDate.getTime())) {
-            points.push({ date: currentDate, views: window.toNumber(video.views), isCurrent: true });
-        }
+        state.videoChannelTrendChartInstance = new Chart(canvas.getContext('2d'), {
+            type: 'scatter',
+            data: { datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: chartTitle('This Video vs Channel Distribution'),
+                    subtitle: chartSubtitle(
+                        `Channel medians: ${window.formatNumber(medianViews)} views • ${medianEng.toFixed(2)}% engagement`,
+                    ),
+                    legend: { position: 'bottom', labels: legendLabelStyle() },
+                    tooltip: tooltipDefaults({
+                        title: (items) => items[0].raw.title || 'Video',
+                        body: (d) => [
+                            `Views: ${window.formatNumber(d.views)}`,
+                            `Engagement: ${d.y.toFixed(2)}%`,
+                        ],
+                    }),
+                },
+                scales: {
+                    x: {
+                        type: 'logarithmic',
+                        grid: { color: theme().grid },
+                        ticks: {
+                            color: theme().textMuted,
+                            font: { size: 12, weight: '500' },
+                            callback: (v) => window.formatNumber(v),
+                            padding: 10,
+                        },
+                        title: { display: true, text: 'Views (log)', color: theme().textMuted, font: { size: 11, weight: '600' } },
+                    },
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: theme().grid },
+                        ticks: { ...numericAxis().ticks, callback: (v) => `${v}%` },
+                        title: { display: true, text: 'Engagement %', color: theme().textMuted, font: { size: 11, weight: '600' } },
+                    },
+                },
+            },
+        });
+    }
 
-        if (points.length === 0) {
-            canvas.parentElement.innerHTML = '<p class="placeholder">No timeline data available</p>';
-            return;
-        }
+    // ---------------------------------------------------------------------
+    // Velocity — actual since-publish rates, NOT linear extrapolation.
+    //
+    // Old chart computed total_views/days_since_publish then *365 for "per
+    // year". YouTube views follow a power-law decay: ~50% of lifetime views
+    // typically come in the first week. Multiplying daily rate by 365 is
+    // fantasy. Now we show:
+    //   - Lifetime total
+    //   - Per-day rate since publish (honest)
+    //   - Per-week rate (= per-day × 7, just unit conversion)
+    //   - Estimated daily earnings at current RPM
+    // No "monthly/yearly projection" anymore.
+    // ---------------------------------------------------------------------
+    function drawVideoVelocityChart(canvas, video) {
+        if (!canvas || !canvas.getContext) return;
+        if (state.videoVelocityChartInstance) state.videoVelocityChartInstance.destroy();
 
-        const sorted = points.sort((a, b) => a.date - b.date);
-        const labels = sorted.map(p => p.date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }));
-        const channelSeries = sorted.map(p => (p.isCurrent ? null : p.views));
-        const currentSeries = sorted.map(p => (p.isCurrent ? p.views : null));
-        const channelViews = sorted.filter(p => !p.isCurrent).map(p => p.views);
-        const avg = channelViews.length ? (channelViews.reduce((s, v) => s + v, 0) / channelViews.length) : null;
-        const avgLine = sorted.map(() => avg);
-        const currentViews = window.toNumber(video?.views);
-        const deltaPct = avg > 0 ? ((currentViews / avg) * 100) : null;
-        const currentColor = avg > 0 && currentViews >= avg ? theme().brandGreen : theme().brandGold;
+        const views = window.toNumber(video.views);
+        const likes = window.toNumber(video.likes);
+        const days = A().daysSince(video.published_at);
+        if (!days) return placeholder(canvas, 'Publish date required for velocity');
 
-        state.videoChannelTrendChartInstance = new Chart(ctx, {
-            type: 'line',
+        const rpmInput = document.getElementById('video-rpm-input');
+        const rpm = rpmInput ? Math.max(0, parseFloat(rpmInput.value || '0')) : 0;
+
+        const viewsPerDay = views / days;
+        const likesPerDay = likes / days;
+        const earningsPerDay = (viewsPerDay / 1000) * rpm;
+        const earningsLifetime = (views / 1000) * rpm;
+
+        const labels = ['Per Day', 'Per Week', 'Lifetime'];
+        const viewsSeries = [viewsPerDay, viewsPerDay * 7, views];
+        const likesSeries = [likesPerDay, likesPerDay * 7, likes];
+        const earningsSeries = [earningsPerDay, earningsPerDay * 7, earningsLifetime];
+
+        state.videoVelocityChartInstance = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
             data: {
                 labels,
                 datasets: [
                     {
-                        label: 'Channel Views',
-                        data: channelSeries,
-                        borderColor: theme().brandBlue,
+                        label: 'Views',
+                        data: viewsSeries,
                         backgroundColor: theme().brandBlueLight,
-                        fill: true,
-                        tension: 0.35,
-                        pointRadius: 2
+                        borderColor: theme().brandBlue,
+                        borderWidth: 2,
+                        borderRadius: 6,
+                        borderSkipped: false,
                     },
                     {
-                        label: 'Channel Average',
-                        data: avgLine,
-                        borderColor: 'rgba(120, 130, 140, 0.9)',
-                        borderDash: [6, 4],
+                        label: 'Likes',
+                        data: likesSeries,
+                        backgroundColor: theme().brandGreenLight,
+                        borderColor: theme().brandGreen,
+                        borderWidth: 2,
+                        borderRadius: 6,
+                        borderSkipped: false,
+                    },
+                    {
+                        label: 'Earnings (USD)',
+                        data: earningsSeries,
+                        type: 'line',
+                        borderColor: theme().brandGold,
+                        backgroundColor: theme().brandGoldLight,
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
                         fill: false,
-                        pointRadius: 0
+                        yAxisID: 'y1',
                     },
-                    {
-                        label: 'This Video',
-                        data: currentSeries,
-                        borderColor: currentColor,
-                        backgroundColor: currentColor,
-                        showLine: false,
-                        pointRadius: 5,
-                        pointHoverRadius: 7
-                    }
-                ]
+                ],
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    title: { display: true, text: 'Trend vs Channel Average', color: theme().text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
-                    subtitle: {
-                        display: true,
-                        text: avg > 0 ? `This video: ${window.formatNumber(currentViews)} views • ${deltaPct.toFixed(0)}% of channel avg` : 'Channel average unavailable',
-                        color: theme().textMuted,
-                        font: { size: 11, weight: '500' },
-                        padding: { bottom: 8 }
-                    },
-                    legend: { position: 'bottom', labels: { color: theme().textMuted, font: { size: 11, weight: '600' } } },
-                    tooltip: {
-                        enabled: true,
-                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                        padding: 14,
-                        titleFont: { size: 13, weight: '600' },
-                        bodyFont: { size: 12, weight: '500' },
-                        borderColor: theme().border,
-                        borderWidth: 1,
-                        callbacks: {
-                            label: (c) => {
-                                if (c.dataset.label === 'This Video' && avg > 0) {
-                                    const pct = ((c.parsed.y / avg) * 100).toFixed(0);
-                                    return `${window.formatNumber(c.parsed.y)} views (${pct}% of avg)`;
-                                }
-                                return window.formatNumber(c.parsed.y) + ' views';
+                    title: chartTitle('Velocity Since Publish'),
+                    subtitle: chartSubtitle(
+                        `Video age: ${days} day${days === 1 ? '' : 's'} • RPM $${rpm.toFixed(2)}/1k views`
+                        + ` • per-day = lifetime ÷ age (smoothed average)`,
+                    ),
+                    legend: { position: 'bottom', labels: legendLabelStyle() },
+                    tooltip: tooltipDefaults({
+                        body: (c) => {
+                            const label = c.dataset.label || '';
+                            if (c.dataset.yAxisID === 'y1') {
+                                return `${label}: $${c.parsed.y.toFixed(2)}`;
                             }
-                        }
-                    }
+                            return `${label}: ${window.formatNumber(Math.round(c.parsed.y))}`;
+                        },
+                    }),
                 },
                 scales: {
-                    y: {
-                        beginAtZero: true,
-                        grid: { color: theme().grid, drawBorder: true, borderColor: theme().border },
-                        ticks: { color: theme().textMuted, font: { size: 12, weight: '500' }, callback: (v) => window.formatNumber(v), padding: 10 }
-                    },
-                    x: {
-                        grid: { display: false, drawBorder: false },
-                        ticks: { color: theme().text, font: { size: 12, weight: '600' }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }
-                    }
-                }
-            }
-        });
-    }
-
-    function drawVideoVelocityChart(canvas, video) {
-        if (!canvas || !canvas.getContext) return;
-        if (state.videoVelocityChartInstance) {
-            state.videoVelocityChartInstance.destroy();
-        }
-
-        const views = window.toNumber(video.views);
-        const likes = window.toNumber(video.likes);
-        const rpmInput = document.getElementById('video-rpm-input');
-        const rpm = rpmInput ? Math.max(0, parseFloat(rpmInput.value || '0')) : 0;
-        const publishedAt = video.published_at ? new Date(video.published_at) : null;
-        if (!publishedAt || Number.isNaN(publishedAt.getTime())) {
-            canvas.parentElement.innerHTML = '<p class="placeholder">Publish date required for velocity</p>';
-            return;
-        }
-
-        const days = Math.max(1, Math.floor((Date.now() - publishedAt.getTime()) / (1000 * 60 * 60 * 24)));
-        const viewsPerDay = views / days;
-        const likesPerDay = likes / days;
-        const earningsPerDay = (viewsPerDay / 1000) * rpm;
-        const daysPerMonth = 30.4;
-        const daysPerYear = 365;
-
-        const labels = ['Per Day', 'Per Month', 'Per Year'];
-        const viewsSeries = [viewsPerDay, viewsPerDay * daysPerMonth, viewsPerDay * daysPerYear];
-        const likesSeries = [likesPerDay, likesPerDay * daysPerMonth, likesPerDay * daysPerYear];
-        const earningsSeries = [earningsPerDay, earningsPerDay * daysPerMonth, earningsPerDay * daysPerYear];
-
-        const ctx = canvas.getContext('2d');
-        state.videoVelocityChartInstance = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels,
-                datasets: [{
-                    label: 'Views',
-                    data: viewsSeries,
-                    borderColor: theme().brandBlue,
-                    backgroundColor: theme().brandBlueLight,
-                    fill: true,
-                    tension: 0.35,
-                    pointRadius: 3,
-                    pointHoverRadius: 5
-                }, {
-                    label: 'Likes',
-                    data: likesSeries,
-                    borderColor: theme().brandGreen,
-                    backgroundColor: theme().brandGreenLight,
-                    fill: true,
-                    tension: 0.35,
-                    pointRadius: 3,
-                    pointHoverRadius: 5
-                }, {
-                    label: 'Estimated Earnings (USD)',
-                    data: earningsSeries,
-                    borderColor: theme().brandGold,
-                    backgroundColor: theme().brandGoldLight,
-                    fill: false,
-                    tension: 0.35,
-                    pointRadius: 3,
-                    pointHoverRadius: 5,
-                    yAxisID: 'y1'
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: { display: true, text: 'Velocity Trend (Relative Rates)', color: theme().text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
-                    subtitle: { display: true, text: `Normalized by publish date • RPM: $${rpm.toFixed(2)} per 1,000 views`, color: theme().textMuted, font: { size: 11, weight: '500' }, padding: { bottom: 8 } },
-                    legend: { position: 'bottom', labels: { color: theme().textMuted, font: { size: 11, weight: '600' } } },
-                    tooltip: {
-                        enabled: true,
-                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                        padding: 14,
-                        titleFont: { size: 12, weight: '600' },
-                        bodyFont: { size: 12, weight: '500' },
-                        borderColor: theme().border,
-                        borderWidth: 1,
-                        callbacks: {
-                            label: (c) => {
-                                const label = c.dataset.label || '';
-                                if (c.dataset.yAxisID === 'y1') {
-                                    return `${label}: $${c.parsed.y.toFixed(2)}`;
-                                }
-                                return `${label}: ${window.formatNumber(Math.round(c.parsed.y))}`;
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        grid: { color: theme().grid, drawBorder: true, borderColor: theme().border },
-                        ticks: { color: theme().textMuted, font: { size: 12, weight: '500' }, callback: (v) => window.formatNumber(v), padding: 10 }
-                    },
+                    y: numericAxis(),
                     y1: {
                         beginAtZero: true,
                         position: 'right',
-                        grid: { display: false, drawBorder: false },
-                        ticks: { color: theme().textMuted, font: { size: 12, weight: '500' }, callback: (v) => `$${v}`, padding: 10 }
+                        grid: { display: false },
+                        ticks: {
+                            color: theme().textMuted,
+                            font: { size: 12, weight: '500' },
+                            callback: (v) => `$${v}`,
+                            padding: 10,
+                        },
                     },
-                    x: {
-                        grid: { display: false, drawBorder: false },
-                        ticks: { color: theme().text, font: { size: 12, weight: '600' }, padding: 10 }
-                    }
-                }
-            }
+                    x: { grid: { display: false }, ticks: labelTickStyle() },
+                },
+            },
         });
+    }
+
+    // ---------------------------------------------------------------------
+    // Shared option helpers
+    // ---------------------------------------------------------------------
+    function chartTitle(text) {
+        return { display: true, text, color: theme().text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } };
+    }
+    function chartSubtitle(text) {
+        return { display: true, text, color: theme().textMuted, font: { size: 11, weight: '500' }, padding: { bottom: 8 } };
+    }
+    function legendLabelStyle() {
+        return { color: theme().textMuted, font: { size: 11, weight: '600' } };
+    }
+    function labelTickStyle(extra = {}) {
+        return { color: theme().text, font: { size: 12, weight: '600' }, padding: 10, ...extra };
+    }
+    function numericAxis() {
+        return {
+            beginAtZero: true,
+            grid: { color: theme().grid },
+            ticks: {
+                color: theme().textMuted,
+                font: { size: 12, weight: '500' },
+                callback: (v) => window.formatNumber(v),
+                padding: 10,
+            },
+        };
+    }
+    function tooltipDefaults({ title, body }) {
+        return {
+            enabled: true,
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            padding: 14,
+            titleFont: { size: 13, weight: '600' },
+            bodyFont: { size: 12, weight: '500' },
+            borderColor: theme().border,
+            borderWidth: 1,
+            callbacks: {
+                ...(title ? { title } : {}),
+                label: (item) => {
+                    const result = body(item.raw || item);
+                    return Array.isArray(result) ? result : [result];
+                },
+            },
+        };
     }
 
     window.VideoCharts = {
@@ -490,6 +523,6 @@
         drawVideoEngagementRateChart,
         drawVideoPercentileChart,
         drawVideoChannelTrendChart,
-        drawVideoVelocityChart
+        drawVideoVelocityChart,
     };
 })();

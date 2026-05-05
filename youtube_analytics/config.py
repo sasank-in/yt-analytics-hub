@@ -5,6 +5,7 @@ from .env file using python-dotenv.
 """
 
 import os
+
 from dotenv import load_dotenv
 
 # Load environment variables from .env file

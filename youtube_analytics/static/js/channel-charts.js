@@ -1,621 +1,575 @@
+/**
+ * Channel-detail charts.
+ *
+ * Honest-analytics rewrite (see ANALYTICS.md if extracted):
+ *   - "CTR Proxy" → renamed to "Like Rate" (likes/views, NOT click-through)
+ *   - "Engagement Rate Over Time" → per-video scatter so the user can see
+ *     each video's age vs engagement instead of a falsely-aggregated line
+ *   - "Top 5% View Outliers" → median + 2.5·MAD outlier test, robust at n≥10
+ *   - "Top Comments" → horizontal bar (data is not share-of-whole)
+ *   - "Publishing Timeline" → relabelled "Lifetime Views by Publish Date"
+ */
 (function () {
-    const state = window.ChannelChartsState || (window.ChannelChartsState = {});
+    'use strict';
 
-    function theme() {
-        return window.CHART_THEME;
+    const state = window.ChannelChartsState || (window.ChannelChartsState = {});
+    const theme = () => window.CHART_THEME;
+    const A = () => window.Analytics;
+
+    function placeholder(canvas, msg) {
+        canvas.parentElement.innerHTML = `<p class="placeholder">${msg}</p>`;
     }
 
+    // ---------------------------------------------------------------------
+    // Top videos: views vs likes scatter, bubble size = √comments
+    // ---------------------------------------------------------------------
     function drawTopVideosChart(canvas, videos) {
-        if (state.topVideosChartInstance) {
-            state.topVideosChartInstance.destroy();
-        }
+        if (state.topVideosChartInstance) state.topVideosChartInstance.destroy();
+        if (videos.length === 0) return placeholder(canvas, 'No video data available');
 
-        if (videos.length === 0) {
-            canvas.parentElement.innerHTML = '<p class="placeholder">No video data available</p>';
-            return;
-        }
+        const top = videos
+            .map((v) => ({
+                title: (v.title || 'Video').substring(0, 20),
+                views: window.toNumber(v.views),
+                likes: window.toNumber(v.likes),
+                comments: window.toNumber(v.comments),
+            }))
+            .sort((a, b) => b.views - a.views)
+            .slice(0, 12);
 
-        const topVideos = videos.map(v => ({
-            title: (v.title || 'Video').substring(0, 20),
-            views: window.toNumber(v.views),
-            likes: window.toNumber(v.likes),
-            comments: window.toNumber(v.comments)
-        })).sort((a, b) => b.views - a.views).slice(0, 12);
-
-        const ctx = canvas.getContext('2d');
-
-        state.topVideosChartInstance = new Chart(ctx, {
+        state.topVideosChartInstance = new Chart(canvas.getContext('2d'), {
             type: 'scatter',
             data: {
                 datasets: [{
-                    label: 'Views vs Likes (bubble size = comments)',
-                    data: topVideos.map(v => ({
+                    label: 'Top videos',
+                    data: top.map((v) => ({
                         x: v.views,
                         y: v.likes,
                         r: Math.max(4, Math.sqrt(v.comments || 0)),
-                        title: v.title
+                        title: v.title,
                     })),
                     backgroundColor: theme().brandBlueLight,
                     borderColor: theme().brandBlue,
-                    borderWidth: 2
-                }]
+                    borderWidth: 2,
+                }],
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: { display: true, text: 'Top Videos: Views vs Likes', color: theme().text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
-                    subtitle: { display: true, text: `Bubble size = comments • Sample size: ${topVideos.length}`, color: theme().textMuted, font: { size: 11, weight: '500' }, padding: { bottom: 8 } },
-                    legend: { display: false },
-                    tooltip: {
-                        enabled: true,
-                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                        padding: 14,
-                        titleFont: { size: 13, weight: '600' },
-                        bodyFont: { size: 12, weight: '500' },
-                        borderColor: theme().border,
-                        borderWidth: 1,
-                        callbacks: {
-                            title: (items) => items[0].raw.title || 'Video',
-                            label: (item) => {
-                                const d = item.raw;
-                                return [
-                                    `Views: ${window.formatNumber(d.x)}`,
-                                    `Likes: ${window.formatNumber(d.y)}`,
-                                    `Comments: ${window.formatNumber(Math.round(d.r * d.r))}`
-                                ];
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        beginAtZero: true,
-                        grid: { color: theme().grid, drawBorder: true, borderColor: theme().border },
-                        ticks: { color: theme().textMuted, font: { size: 12, weight: '500' }, callback: (v) => window.formatNumber(v), padding: 10 }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        grid: { color: theme().grid, drawBorder: true, borderColor: theme().border },
-                        ticks: { color: theme().textMuted, font: { size: 12, weight: '500' }, callback: (v) => window.formatNumber(v), padding: 10 }
-                    }
-                }
-            }
+            options: scatterOptions({
+                title: 'Top Videos: Views vs Likes',
+                subtitle: `Bubble size = √comments • n = ${top.length}`,
+                xLabel: 'Views',
+                yLabel: 'Likes',
+                tooltipBody: (d) => [
+                    `Views: ${window.formatNumber(d.x)}`,
+                    `Likes: ${window.formatNumber(d.y)}`,
+                    `Comments: ${window.formatNumber(Math.round(d.r * d.r))}`,
+                ],
+            }),
         });
     }
 
+    // ---------------------------------------------------------------------
+    // Engagement metrics — bubble of (views, likes, comments, engagement)
+    // Same as before, but with honest subtitle.
+    // ---------------------------------------------------------------------
     function drawEngagementChart(canvas, videos) {
-        if (state.engagementChartInstance) {
-            state.engagementChartInstance.destroy();
-        }
+        if (state.engagementChartInstance) state.engagementChartInstance.destroy();
+        if (videos.length === 0) return placeholder(canvas, 'No video data available');
 
-        if (videos.length === 0) {
-            canvas.parentElement.innerHTML = '<p class="placeholder">No video data available</p>';
-            return;
-        }
+        const points = videos
+            .map((v) => {
+                const views = window.toNumber(v.views);
+                const likes = window.toNumber(v.likes);
+                const comments = window.toNumber(v.comments);
+                return {
+                    title: (v.title || 'Video').substring(0, 18),
+                    views, likes, comments,
+                    engagement: A().engagementRate({ likes, comments, views }),
+                };
+            })
+            .filter((p) => p.views > 0 || p.likes > 0 || p.comments > 0);
 
-        const points = videos.map(v => {
-            const views = window.toNumber(v.views);
-            const likes = window.toNumber(v.likes);
-            const comments = window.toNumber(v.comments);
-            const engagement = views > 0 ? ((likes + comments) / views) * 100 : 0;
-            return {
-                title: (v.title || 'Video').substring(0, 18),
-                views,
-                likes,
-                comments,
-                engagement
-            };
-        }).filter(p => p.views > 0 || p.likes > 0 || p.comments > 0);
+        if (points.length === 0) return placeholder(canvas, 'No engagement data available');
 
-        if (points.length === 0) {
-            canvas.parentElement.innerHTML = '<p class="placeholder">No engagement data available</p>';
-            return;
-        }
-
-        const ctx = canvas.getContext('2d');
-        const minRate = Math.min(...points.map(p => p.engagement));
-        const maxRate = Math.max(...points.map(p => p.engagement));
-
+        const minRate = Math.min(...points.map((p) => p.engagement));
+        const maxRate = Math.max(...points.map((p) => p.engagement));
         const lerp = (a, b, t) => Math.round(a + (b - a) * t);
         const rateColor = (rate) => {
             const t = maxRate > minRate ? (rate - minRate) / (maxRate - minRate) : 0.5;
-            const r = lerp(31, 176, t);
-            const g = lerp(122, 135, t);
-            const b = lerp(85, 74, t);
-            return `rgba(${r}, ${g}, ${b}, 0.7)`;
+            return `rgba(${lerp(31, 176, t)}, ${lerp(122, 135, t)}, ${lerp(85, 74, t)}, 0.7)`;
         };
 
-        state.engagementChartInstance = new Chart(ctx, {
+        state.engagementChartInstance = new Chart(canvas.getContext('2d'), {
             type: 'bubble',
             data: {
                 datasets: [{
-                    label: 'Engagement vs Views vs Likes',
-                    data: points.map(p => ({
+                    label: 'Engagement',
+                    data: points.map((p) => ({
                         x: p.views,
                         y: p.likes,
                         r: Math.max(4, Math.sqrt(p.comments || 0)),
                         title: p.title,
-                        engagement: p.engagement
+                        engagement: p.engagement,
+                        comments: p.comments,
                     })),
-                    backgroundColor: points.map(p => rateColor(p.engagement)),
+                    backgroundColor: points.map((p) => rateColor(p.engagement)),
                     borderColor: theme().brandBlue,
-                    borderWidth: 1.5
-                }]
+                    borderWidth: 1.5,
+                }],
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: { display: true, text: 'Engagement Metrics Map', color: theme().text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
-                    subtitle: { display: true, text: 'X = views • Y = likes • Bubble size = comments • Color = engagement %', color: theme().textMuted, font: { size: 11, weight: '500' }, padding: { bottom: 8 } },
-                    legend: { display: false },
-                    tooltip: {
-                        enabled: true,
-                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                        padding: 14,
-                        titleFont: { size: 13, weight: '600' },
-                        bodyFont: { size: 12, weight: '500' },
-                        borderColor: theme().border,
-                        borderWidth: 1,
-                        callbacks: {
-                            title: (items) => items[0].raw.title || 'Video',
-                            label: (c) => {
-                                const d = c.raw;
-                                return [
-                                    `Views: ${window.formatNumber(d.x)}`,
-                                    `Likes: ${window.formatNumber(d.y)}`,
-                                    `Comments: ${window.formatNumber(Math.round(d.r * d.r))}`,
-                                    `Engagement: ${d.engagement.toFixed(2)}%`
-                                ];
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        beginAtZero: true,
-                        grid: { color: theme().grid, drawBorder: true, borderColor: theme().border },
-                        ticks: { color: theme().textMuted, font: { size: 12, weight: '500' }, callback: (v) => window.formatNumber(v), padding: 10 }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        grid: { color: theme().grid, drawBorder: true, borderColor: theme().border },
-                        ticks: { color: theme().textMuted, font: { size: 12, weight: '500' }, callback: (v) => window.formatNumber(v), padding: 10 }
-                    }
-                }
-            }
+            options: scatterOptions({
+                title: 'Engagement Metrics Map',
+                subtitle: 'X = views • Y = likes • size = √comments • color = engagement %',
+                xLabel: 'Views',
+                yLabel: 'Likes',
+                tooltipBody: (d) => [
+                    `Views: ${window.formatNumber(d.x)}`,
+                    `Likes: ${window.formatNumber(d.y)}`,
+                    `Comments: ${window.formatNumber(d.comments)}`,
+                    `Engagement: ${d.engagement.toFixed(2)}%`,
+                ],
+            }),
         });
     }
 
+    // ---------------------------------------------------------------------
+    // Top comments: horizontal bar (NOT a doughnut — data isn't share-of-whole)
+    // ---------------------------------------------------------------------
     function drawCommentsChart(canvas, videos) {
-        if (state.commentsChartInstance) {
-            state.commentsChartInstance.destroy();
-        }
+        if (state.commentsChartInstance) state.commentsChartInstance.destroy();
+        if (videos.length === 0) return placeholder(canvas, 'No video data available');
 
-        if (videos.length === 0) {
-            canvas.parentElement.innerHTML = '<p class="placeholder">No video data available</p>';
-            return;
-        }
-
-        const topComments = videos.map(v => ({
-            title: (v.title || 'Video').substring(0, 16),
-            comments: window.toNumber(v.comments)
-        })).sort((a, b) => b.comments - a.comments).slice(0, 6);
-
-        if (topComments.length === 0) {
-            canvas.parentElement.innerHTML = '<p class="placeholder">No comment data available</p>';
-            return;
-        }
-
-        const ctx = canvas.getContext('2d');
-        state.commentsChartInstance = new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-                labels: topComments.map(v => v.title),
-                datasets: [{
-                    label: 'Comments Share',
-                    data: topComments.map(v => v.comments),
-                    backgroundColor: [
-                        'rgba(176, 135, 74, 0.85)',
-                        'rgba(15, 76, 129, 0.85)',
-                        'rgba(31, 122, 85, 0.85)',
-                        'rgba(45, 120, 190, 0.85)',
-                        'rgba(95, 166, 127, 0.85)',
-                        'rgba(196, 170, 123, 0.85)'
-                    ],
-                    borderColor: theme().border,
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: { display: true, text: 'Comment Share (Top Videos)', color: theme().text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
-                    subtitle: { display: true, text: `Top ${topComments.length} by comments`, color: theme().textMuted, font: { size: 11, weight: '500' }, padding: { bottom: 8 } },
-                    legend: { position: 'bottom', labels: { color: theme().textMuted, font: { size: 11, weight: '600' } } },
-                    tooltip: {
-                        enabled: true,
-                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                        padding: 14,
-                        titleFont: { size: 13, weight: '600' },
-                        bodyFont: { size: 12, weight: '500' },
-                        borderColor: theme().border,
-                        borderWidth: 1,
-                        callbacks: { label: (c) => window.formatNumber(c.parsed) + ' comments' }
-                    }
-                }
-            }
-        });
-    }
-
-    function drawViewsTrendChart(canvas, videos) {
-        if (state.viewsTrendChartInstance) {
-            state.viewsTrendChartInstance.destroy();
-        }
-
-        if (videos.length === 0) {
-            canvas.parentElement.innerHTML = '<p class="placeholder">No video data available</p>';
-            return;
-        }
-
-        const points = videos
-            .map(v => ({
-                date: v.published_at ? new Date(v.published_at) : null,
-                views: window.toNumber(v.views)
+        const top = videos
+            .map((v) => ({
+                title: (v.title || 'Video').substring(0, 28),
+                comments: window.toNumber(v.comments),
             }))
-            .filter(v => v.date && !Number.isNaN(v.date.getTime()))
-            .sort((a, b) => a.date - b.date);
+            .filter((v) => v.comments > 0)
+            .sort((a, b) => b.comments - a.comments)
+            .slice(0, 8);
 
-        if (points.length === 0) {
-            canvas.parentElement.innerHTML = '<p class="placeholder">No timeline data available</p>';
-            return;
-        }
+        if (top.length === 0) return placeholder(canvas, 'No comment data available');
 
-        const labels = points.map(p => p.date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }));
-        const data = points.map(p => p.views);
-
-        const ctx = canvas.getContext('2d');
-        const avgViews = data.reduce((s, v) => s + v, 0) / (data.length || 1);
-
-        state.viewsTrendChartInstance = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels,
-                datasets: [{
-                    label: 'Views',
-                    data,
-                    borderColor: theme().brandBlue,
-                    backgroundColor: theme().brandBlueLight,
-                    fill: true,
-                    tension: 0.35,
-                    pointRadius: 3,
-                    pointHoverRadius: 5
-                }, {
-                    label: 'Average',
-                    data: labels.map(() => avgViews),
-                    borderColor: 'rgba(120, 130, 140, 0.9)',
-                    borderDash: [6, 4],
-                    fill: false,
-                    pointRadius: 0
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: { display: true, text: 'Publishing Timeline (Views)', color: theme().text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
-                    subtitle: { display: true, text: `Benchmark: Average views • Sample size: ${data.length}`, color: theme().textMuted, font: { size: 11, weight: '500' }, padding: { bottom: 8 } },
-                    legend: { position: 'bottom', labels: { color: theme().textMuted, font: { size: 11, weight: '600' } } },
-                    tooltip: {
-                        enabled: true,
-                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                        padding: 14,
-                        titleFont: { size: 13, weight: '600' },
-                        bodyFont: { size: 12, weight: '500' },
-                        borderColor: theme().border,
-                        borderWidth: 1,
-                        callbacks: { label: (c) => window.formatNumber(c.parsed.y) + ' views' }
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        grid: { color: theme().grid, drawBorder: true, borderColor: theme().border },
-                        ticks: { color: theme().textMuted, font: { size: 12, weight: '500' }, callback: (v) => window.formatNumber(v), padding: 10 }
-                    },
-                    x: {
-                        grid: { display: false, drawBorder: false },
-                        ticks: { color: theme().text, font: { size: 12, weight: '600' }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }
-                    }
-                }
-            }
-        });
-    }
-
-    function drawEngagementTrendChart(canvas, videos) {
-        if (state.engagementTrendChartInstance) {
-            state.engagementTrendChartInstance.destroy();
-        }
-
-        if (videos.length === 0) {
-            canvas.parentElement.innerHTML = '<p class="placeholder">No video data available</p>';
-            return;
-        }
-
-        const monthly = {};
-        videos.forEach(v => {
-            if (!v.published_at) return;
-            const date = new Date(v.published_at);
-            if (Number.isNaN(date.getTime())) return;
-            const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-            const views = window.toNumber(v.views);
-            const likes = window.toNumber(v.likes);
-            const comments = window.toNumber(v.comments);
-            if (!monthly[key]) {
-                monthly[key] = { views: 0, likes: 0, comments: 0 };
-            }
-            monthly[key].views += views;
-            monthly[key].likes += likes;
-            monthly[key].comments += comments;
-        });
-
-        const keys = Object.keys(monthly).sort();
-        if (keys.length === 0) {
-            canvas.parentElement.innerHTML = '<p class="placeholder">No timeline data available</p>';
-            return;
-        }
-
-        const labels = keys.map(k => {
-            const [y, m] = k.split('-');
-            const date = new Date(Number(y), Number(m) - 1, 1);
-            return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
-        });
-        const data = keys.map(k => {
-            const row = monthly[k];
-            return row.views > 0 ? ((row.likes + row.comments) / row.views * 100) : 0;
-        });
-
-        const ctx = canvas.getContext('2d');
-        state.engagementTrendChartInstance = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels,
-                datasets: [{
-                    label: 'Engagement Rate (%)',
-                    data,
-                    borderColor: theme().brandGreen,
-                    backgroundColor: theme().brandGreenLight,
-                    fill: true,
-                    tension: 0.35,
-                    pointRadius: 3,
-                    pointHoverRadius: 5
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: { display: true, text: 'Engagement Rate Over Time', color: theme().text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
-                    legend: { display: false },
-                    tooltip: {
-                        enabled: true,
-                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                        padding: 14,
-                        titleFont: { size: 12, weight: '600' },
-                        bodyFont: { size: 12, weight: '500' },
-                        borderColor: theme().border,
-                        borderWidth: 1,
-                        callbacks: { label: (c) => c.parsed.y.toFixed(2) + '%' }
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        grid: { color: theme().grid, drawBorder: true, borderColor: theme().border },
-                        ticks: { color: theme().textMuted, font: { size: 12, weight: '500' }, callback: (v) => v + '%', padding: 10 }
-                    },
-                    x: {
-                        grid: { display: false, drawBorder: false },
-                        ticks: { color: theme().text, font: { size: 12, weight: '600' }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }
-                    }
-                }
-            }
-        });
-    }
-
-    function drawCtrProxyChart(canvas, videos) {
-        if (state.ctrProxyChartInstance) {
-            state.ctrProxyChartInstance.destroy();
-        }
-
-        if (videos.length === 0) {
-            canvas.parentElement.innerHTML = '<p class="placeholder">No video data available</p>';
-            return;
-        }
-
-        const byRate = videos.map(v => {
-            const views = window.toNumber(v.views);
-            const likes = window.toNumber(v.likes);
-            return {
-                title: (v.title || 'Video').substring(0, 18),
-                rate: views > 0 ? (likes / views * 100) : 0
-            };
-        }).sort((a, b) => b.rate - a.rate).slice(0, 8);
-
-        const ctx = canvas.getContext('2d');
-        state.ctrProxyChartInstance = new Chart(ctx, {
+        state.commentsChartInstance = new Chart(canvas.getContext('2d'), {
             type: 'bar',
             data: {
-                labels: byRate.map(v => v.title),
+                labels: top.map((v) => v.title),
                 datasets: [{
-                    label: 'Likes per View (%)',
-                    data: byRate.map(v => v.rate),
-                    backgroundColor: theme().brandBlueLight,
-                    borderColor: theme().brandBlue,
+                    label: 'Comments',
+                    data: top.map((v) => v.comments),
+                    backgroundColor: theme().brandGoldLight,
+                    borderColor: theme().brandGold,
                     borderWidth: 2,
-                    borderRadius: 10,
+                    borderRadius: 6,
                     borderSkipped: false,
-                    hoverBackgroundColor: theme().brandBlue,
-                    hoverBorderWidth: 2.5
-                }]
+                }],
             },
             options: {
                 indexAxis: 'y',
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    title: { display: true, text: 'CTR Proxy (Likes per View)', color: theme().text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
+                    title: chartTitle('Most-Discussed Videos'),
+                    subtitle: chartSubtitle(`Top ${top.length} by comment count`),
                     legend: { display: false },
-                    tooltip: {
-                        enabled: true,
-                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                        padding: 14,
-                        titleFont: { size: 12, weight: '600' },
-                        bodyFont: { size: 12, weight: '500' },
-                        borderColor: theme().border,
-                        borderWidth: 1,
-                        callbacks: { label: (c) => c.parsed.x.toFixed(2) + '%' }
-                    }
+                    tooltip: tooltipDefaults({
+                        body: (c) => `${window.formatNumber(c.parsed.x)} comments`,
+                    }),
                 },
                 scales: {
-                    x: {
-                        beginAtZero: true,
-                        grid: { color: theme().grid, drawBorder: true, borderColor: theme().border },
-                        ticks: { color: theme().textMuted, font: { size: 12, weight: '500' }, callback: (v) => v + '%', padding: 10 }
-                    },
-                    y: {
-                        grid: { display: false, drawBorder: false },
-                        ticks: { color: theme().text, font: { size: 12, weight: '600' }, padding: 10 }
-                    }
-                }
-            }
+                    x: numericAxis(),
+                    y: { grid: { display: false }, ticks: labelTickStyle() },
+                },
+            },
         });
     }
 
-    function drawOutliersChart(canvas, videos) {
-        if (state.outliersChartInstance) {
-            state.outliersChartInstance.destroy();
-        }
+    // ---------------------------------------------------------------------
+    // Lifetime views by publish date.
+    // Renamed from "Publishing Timeline (Views)" — the line implies time-series
+    // continuity but it's really cumulative-lifetime views, so we now overlay a
+    // mean baseline and clearly title it.
+    // ---------------------------------------------------------------------
+    function drawViewsTrendChart(canvas, videos) {
+        if (state.viewsTrendChartInstance) state.viewsTrendChartInstance.destroy();
+        if (videos.length === 0) return placeholder(canvas, 'No video data available');
 
-        if (videos.length === 0) {
-            canvas.parentElement.innerHTML = '<p class="placeholder">No video data available</p>';
-            return;
-        }
+        const points = videos
+            .map((v) => ({
+                date: v.published_at ? new Date(v.published_at) : null,
+                views: window.toNumber(v.views),
+                title: v.title || 'Video',
+            }))
+            .filter((v) => v.date && !Number.isNaN(v.date.getTime()))
+            .sort((a, b) => a.date - b.date);
 
-        const viewsList = videos.map(v => window.toNumber(v.views)).filter(v => v > 0).sort((a, b) => a - b);
-        if (viewsList.length === 0) {
-            canvas.parentElement.innerHTML = '<p class="placeholder">No view data available</p>';
-            return;
-        }
+        if (points.length === 0) return placeholder(canvas, 'No timeline data available');
 
-        const idx = Math.floor(viewsList.length * 0.95);
-        const threshold = viewsList[Math.min(idx, viewsList.length - 1)];
+        const labels = points.map((p) => p.date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }));
+        const data = points.map((p) => p.views);
+        const avgViews = data.reduce((s, v) => s + v, 0) / data.length;
 
-        let outliers = videos
-            .map(v => {
-                const views = window.toNumber(v.views);
-                const likes = window.toNumber(v.likes);
-                const comments = window.toNumber(v.comments);
-                const engagement = views > 0 ? ((likes + comments) / views) * 100 : 0;
-                return {
-                    title: (v.title || 'Video').substring(0, 20),
-                    views,
-                    likes,
-                    comments,
-                    engagement
-                };
-            })
-            .filter(v => v.views >= threshold)
-            .sort((a, b) => b.views - a.views)
-            .slice(0, 12);
-
-        if (outliers.length === 0) {
-            outliers = videos
-                .map(v => {
-                    const views = window.toNumber(v.views);
-                    const likes = window.toNumber(v.likes);
-                    const comments = window.toNumber(v.comments);
-                    const engagement = views > 0 ? ((likes + comments) / views) * 100 : 0;
-                    return {
-                        title: (v.title || 'Video').substring(0, 20),
-                        views,
-                        likes,
-                        comments,
-                        engagement
-                    };
-                })
-                .sort((a, b) => b.views - a.views)
-                .slice(0, 6);
-        }
-
-        const ctx = canvas.getContext('2d');
-        state.outliersChartInstance = new Chart(ctx, {
-            type: 'bubble',
+        state.viewsTrendChartInstance = new Chart(canvas.getContext('2d'), {
+            type: 'line',
             data: {
-                datasets: [{
-                    label: 'Outliers',
-                    data: outliers.map(v => ({
-                        x: Math.max(v.views, 1),
-                        y: v.engagement,
-                        r: Math.max(6, Math.sqrt(v.comments || 0)),
-                        title: v.title,
-                        views: v.views,
-                        likes: v.likes,
-                        comments: v.comments
-                    })),
-                    backgroundColor: theme().brandGoldLight,
-                    borderColor: theme().brandGold,
-                    borderWidth: 2,
-                    hoverBackgroundColor: theme().brandGold
-                }]
+                labels,
+                datasets: [
+                    {
+                        label: 'Lifetime views',
+                        data,
+                        borderColor: theme().brandBlue,
+                        backgroundColor: theme().brandBlueLight,
+                        fill: true,
+                        tension: 0.35,
+                        pointRadius: 3,
+                        pointHoverRadius: 5,
+                    },
+                    {
+                        label: 'Mean',
+                        data: labels.map(() => avgViews),
+                        borderColor: 'rgba(120, 130, 140, 0.9)',
+                        borderDash: [6, 4],
+                        fill: false,
+                        pointRadius: 0,
+                    },
+                ],
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    title: { display: true, text: 'Outlier Matrix (Views × Engagement)', color: theme().text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } },
-                    subtitle: { display: true, text: 'Bubble size = comments • X axis = views (log) • Y axis = engagement rate', color: theme().textMuted, font: { size: 11, weight: '500' }, padding: { bottom: 8 } },
+                    title: chartTitle('Lifetime Views by Publish Date'),
+                    subtitle: chartSubtitle('Each point = one video; older videos have had longer to accumulate views'),
+                    legend: { position: 'bottom', labels: legendLabelStyle() },
+                    tooltip: tooltipDefaults({
+                        body: (c) => `${window.formatNumber(c.parsed.y)} views`,
+                    }),
+                },
+                scales: { y: numericAxis(), x: dateAxis() },
+            },
+        });
+    }
+
+    // ---------------------------------------------------------------------
+    // Engagement rate per video (scatter, NOT line over time).
+    //
+    // Old chart aggregated likes/comments/views by publish month and
+    // computed (likes+comments)/views per month — but lifetime totals make
+    // older months look artificially better. Per-video scatter shows the
+    // distribution honestly: each dot = one video, x = publish date, y = %.
+    // ---------------------------------------------------------------------
+    function drawEngagementTrendChart(canvas, videos) {
+        if (state.engagementTrendChartInstance) state.engagementTrendChartInstance.destroy();
+        if (videos.length === 0) return placeholder(canvas, 'No video data available');
+
+        const points = videos
+            .map((v) => {
+                const date = v.published_at ? new Date(v.published_at) : null;
+                if (!date || Number.isNaN(date.getTime())) return null;
+                const views = window.toNumber(v.views);
+                if (views <= 0) return null;
+                return {
+                    x: date.getTime(),
+                    y: A().engagementRate({
+                        likes: v.likes, comments: v.comments, views,
+                    }),
+                    title: v.title || 'Video',
+                    label: date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+                };
+            })
+            .filter(Boolean);
+
+        if (points.length === 0) return placeholder(canvas, 'No engagement data available');
+
+        const med = A().median(points.map((p) => p.y));
+
+        state.engagementTrendChartInstance = new Chart(canvas.getContext('2d'), {
+            type: 'scatter',
+            data: {
+                datasets: [
+                    {
+                        label: 'Per-video engagement',
+                        data: points,
+                        backgroundColor: theme().brandGreenLight,
+                        borderColor: theme().brandGreen,
+                        borderWidth: 1.5,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                    },
+                    {
+                        label: `Channel median (${med.toFixed(2)}%)`,
+                        type: 'line',
+                        data: [
+                            { x: Math.min(...points.map((p) => p.x)), y: med },
+                            { x: Math.max(...points.map((p) => p.x)), y: med },
+                        ],
+                        borderColor: 'rgba(120, 130, 140, 0.9)',
+                        borderDash: [6, 4],
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        fill: false,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: chartTitle('Engagement Rate per Video'),
+                    subtitle: chartSubtitle('Each dot = one video • dashed line = channel median'),
+                    legend: { position: 'bottom', labels: legendLabelStyle() },
+                    tooltip: tooltipDefaults({
+                        title: (items) => items[0].raw.title || 'Video',
+                        body: (d) => [`${d.label}`, `Engagement: ${d.y.toFixed(2)}%`],
+                    }),
+                },
+                scales: {
+                    y: { ...numericAxis(), ticks: { ...numericAxis().ticks, callback: (v) => `${v}%` } },
+                    x: {
+                        type: 'linear',
+                        grid: { display: false },
+                        ticks: {
+                            color: theme().text,
+                            font: { size: 12, weight: '600' },
+                            padding: 10,
+                            maxTicksLimit: 8,
+                            callback: (v) => new Date(v).toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+                        },
+                    },
+                },
+            },
+        });
+    }
+
+    // ---------------------------------------------------------------------
+    // Like rate (rebranded from "CTR Proxy")
+    // CTR = click-through rate (impressions → clicks), which YouTube does NOT
+    // expose via the Data API. likes/views is just the like rate. We label it
+    // honestly now.
+    // ---------------------------------------------------------------------
+    function drawCtrProxyChart(canvas, videos) {
+        if (state.ctrProxyChartInstance) state.ctrProxyChartInstance.destroy();
+        if (videos.length === 0) return placeholder(canvas, 'No video data available');
+
+        const top = videos
+            .map((v) => ({
+                title: (v.title || 'Video').substring(0, 28),
+                rate: A().likeRate({ likes: v.likes, views: v.views }),
+            }))
+            .filter((v) => v.rate > 0)
+            .sort((a, b) => b.rate - a.rate)
+            .slice(0, 8);
+
+        if (top.length === 0) return placeholder(canvas, 'No engagement data');
+
+        state.ctrProxyChartInstance = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: top.map((v) => v.title),
+                datasets: [{
+                    label: 'Like rate (%)',
+                    data: top.map((v) => v.rate),
+                    backgroundColor: theme().brandBlueLight,
+                    borderColor: theme().brandBlue,
+                    borderWidth: 2,
+                    borderRadius: 6,
+                    borderSkipped: false,
+                }],
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: chartTitle('Like Rate (Top 8)'),
+                    subtitle: chartSubtitle('Likes ÷ views • not a click-through-rate proxy'),
                     legend: { display: false },
-                    tooltip: {
-                        enabled: true,
-                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                        padding: 14,
-                        titleFont: { size: 12, weight: '600' },
-                        bodyFont: { size: 12, weight: '500' },
-                        borderColor: theme().border,
+                    tooltip: tooltipDefaults({
+                        body: (c) => `${c.parsed.x.toFixed(2)}%`,
+                    }),
+                },
+                scales: {
+                    x: { ...numericAxis(), ticks: { ...numericAxis().ticks, callback: (v) => `${v}%` } },
+                    y: { grid: { display: false }, ticks: labelTickStyle() },
+                },
+            },
+        });
+    }
+
+    // ---------------------------------------------------------------------
+    // Robust outliers: median + k·MAD.
+    // Replaces the old "top 5%" which was meaningless on n<30.
+    // ---------------------------------------------------------------------
+    function drawOutliersChart(canvas, videos) {
+        if (state.outliersChartInstance) state.outliersChartInstance.destroy();
+        if (videos.length === 0) return placeholder(canvas, 'No video data available');
+
+        const enriched = videos
+            .map((v) => {
+                const views = window.toNumber(v.views);
+                const likes = window.toNumber(v.likes);
+                const comments = window.toNumber(v.comments);
+                return {
+                    title: (v.title || 'Video').substring(0, 22),
+                    views, likes, comments,
+                    engagement: A().engagementRate({ likes, comments, views }),
+                };
+            })
+            .filter((v) => v.views > 0);
+
+        if (enriched.length < 5) return placeholder(canvas, 'Need ≥5 videos for outlier detection');
+
+        const viewsArr = enriched.map((v) => v.views);
+        const med = A().median(viewsArr);
+        const dev = A().mad(viewsArr);
+        const k = 2.5;
+
+        // Annotate each point with its z-score and outlier status.
+        const annotated = enriched.map((v) => {
+            const zMad = dev > 0 ? (v.views - med) / dev : 0;
+            return { ...v, zMad, isOutlier: dev > 0 && zMad > k };
+        });
+
+        const outliers = annotated.filter((v) => v.isOutlier);
+        const normal = annotated.filter((v) => !v.isOutlier);
+
+        state.outliersChartInstance = new Chart(canvas.getContext('2d'), {
+            type: 'bubble',
+            data: {
+                datasets: [
+                    {
+                        label: 'Normal',
+                        data: normal.map((v) => ({
+                            x: Math.max(v.views, 1),
+                            y: v.engagement,
+                            r: Math.max(4, Math.sqrt(v.comments || 0)),
+                            ...v,
+                        })),
+                        backgroundColor: theme().brandBlueLight,
+                        borderColor: theme().brandBlue,
                         borderWidth: 1,
-                        callbacks: {
-                            title: (items) => items[0].raw.title || 'Video',
-                            label: (item) => {
-                                const d = item.raw;
-                                return [
-                                    `Views: ${window.formatNumber(d.views)}`,
-                                    `Engagement: ${d.y.toFixed(2)}%`,
-                                    `Likes: ${window.formatNumber(d.likes)}`,
-                                    `Comments: ${window.formatNumber(d.comments)}`
-                                ];
-                            }
-                        }
-                    }
+                    },
+                    {
+                        label: `Outliers (z-MAD > ${k})`,
+                        data: outliers.map((v) => ({
+                            x: Math.max(v.views, 1),
+                            y: v.engagement,
+                            r: Math.max(6, Math.sqrt(v.comments || 0)),
+                            ...v,
+                        })),
+                        backgroundColor: theme().brandGoldLight,
+                        borderColor: theme().brandGold,
+                        borderWidth: 2,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: chartTitle('View Outliers (Median + MAD)'),
+                    subtitle: chartSubtitle(
+                        `Median: ${window.formatNumber(med)} • MAD: ${window.formatNumber(Math.round(dev))}` +
+                        ` • ${outliers.length} outlier(s) of ${enriched.length}`,
+                    ),
+                    legend: { position: 'bottom', labels: legendLabelStyle() },
+                    tooltip: tooltipDefaults({
+                        title: (items) => items[0].raw.title || 'Video',
+                        body: (d) => [
+                            `Views: ${window.formatNumber(d.views)}`,
+                            `Engagement: ${d.engagement.toFixed(2)}%`,
+                            `z-MAD: ${d.zMad.toFixed(2)}`,
+                        ],
+                    }),
                 },
                 scales: {
                     x: {
                         type: 'logarithmic',
-                        grid: { color: theme().grid, drawBorder: true, borderColor: theme().border },
-                        ticks: { color: theme().textMuted, font: { size: 12, weight: '500' }, callback: (v) => window.formatNumber(v), padding: 10 },
-                        title: { display: true, text: 'Views (log scale)', color: theme().textMuted, font: { size: 11, weight: '600' } }
+                        grid: { color: theme().grid },
+                        ticks: {
+                            color: theme().textMuted,
+                            font: { size: 12, weight: '500' },
+                            callback: (v) => window.formatNumber(v),
+                            padding: 10,
+                        },
+                        title: { display: true, text: 'Views (log)', color: theme().textMuted, font: { size: 11, weight: '600' } },
                     },
                     y: {
                         beginAtZero: true,
-                        grid: { color: theme().grid, drawBorder: true, borderColor: theme().border },
-                        ticks: { color: theme().textMuted, font: { size: 12, weight: '500' }, callback: (v) => v + '%', padding: 10 },
-                        title: { display: true, text: 'Engagement Rate (%)', color: theme().textMuted, font: { size: 11, weight: '600' } }
-                    }
-                }
-            }
+                        grid: { color: theme().grid },
+                        ticks: { ...numericAxis().ticks, callback: (v) => `${v}%` },
+                        title: { display: true, text: 'Engagement %', color: theme().textMuted, font: { size: 11, weight: '600' } },
+                    },
+                },
+            },
         });
+    }
+
+    // ---------------------------------------------------------------------
+    // Shared option helpers
+    // ---------------------------------------------------------------------
+    function chartTitle(text) {
+        return { display: true, text, color: theme().text, font: { size: 15, weight: '600' }, padding: { bottom: 10 } };
+    }
+    function chartSubtitle(text) {
+        return { display: true, text, color: theme().textMuted, font: { size: 11, weight: '500' }, padding: { bottom: 8 } };
+    }
+    function legendLabelStyle() {
+        return { color: theme().textMuted, font: { size: 11, weight: '600' } };
+    }
+    function labelTickStyle(extra = {}) {
+        return { color: theme().text, font: { size: 12, weight: '600' }, padding: 10, ...extra };
+    }
+    function numericAxis() {
+        return {
+            beginAtZero: true,
+            grid: { color: theme().grid },
+            ticks: {
+                color: theme().textMuted,
+                font: { size: 12, weight: '500' },
+                callback: (v) => window.formatNumber(v),
+                padding: 10,
+            },
+        };
+    }
+    function dateAxis() {
+        return {
+            grid: { display: false },
+            ticks: labelTickStyle({ maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }),
+        };
+    }
+    function tooltipDefaults({ title, body }) {
+        return {
+            enabled: true,
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            padding: 14,
+            titleFont: { size: 13, weight: '600' },
+            bodyFont: { size: 12, weight: '500' },
+            borderColor: theme().border,
+            borderWidth: 1,
+            callbacks: {
+                ...(title ? { title } : {}),
+                label: (item) => {
+                    const result = body(item.raw || item);
+                    return Array.isArray(result) ? result : [result];
+                },
+            },
+        };
+    }
+    function scatterOptions({ title, subtitle, tooltipBody }) {
+        return {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: chartTitle(title),
+                subtitle: chartSubtitle(subtitle),
+                legend: { display: false },
+                tooltip: tooltipDefaults({
+                    title: (items) => items[0].raw.title || 'Video',
+                    body: tooltipBody,
+                }),
+            },
+            scales: { x: numericAxis(), y: numericAxis() },
+        };
     }
 
     window.ChannelCharts = {
@@ -624,7 +578,7 @@
         drawCommentsChart,
         drawViewsTrendChart,
         drawEngagementTrendChart,
-        drawCtrProxyChart,
-        drawOutliersChart
+        drawCtrProxyChart,        // kept under old name so app.js doesn't break
+        drawOutliersChart,
     };
 })();

@@ -1,0 +1,22 @@
+services:
+  creatorscope:
+    build: .
+    container_name: creatorscope
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:?set YOUTUBE_API_KEY in your shell or .env}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CHANNEL_REFRESH_SECONDS: ${CHANNEL_REFRESH_SECONDS:-86400}
+      TOP_VIDEOS_LIMIT: ${TOP_VIDEOS_LIMIT:-50}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}
+    volumes:
+      # SQLite DB persists across container restarts.
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

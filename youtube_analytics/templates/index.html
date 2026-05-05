@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube Analytics</title>
+    <title>Creatorscope — YouTube Analytics</title>
     <link rel="icon" href="/static/favicon.ico">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -139,9 +139,9 @@
                             <p class="kpi-sub">Subscribers tracked</p>
                         </div>
                         <div class="kpi-card">
-                            <p class="kpi-label">Avg Views/Video</p>
+                            <p class="kpi-label">Median Views/Video</p>
                             <p class="kpi-value" id="highlight-avg-views">0</p>
-                            <p class="kpi-sub">Across portfolio</p>
+                            <p class="kpi-sub">Median across channels (robust to viral outliers)</p>
                         </div>
                     </div>
 
@@ -157,7 +157,7 @@
                         </div>
                         <div class="panel">
                             <div class="panel-header">
-                                <h3 class="panel-title">Top Efficiency</h3>
+                                <h3 class="panel-title">Highest Avg Views / Video</h3>
                             </div>
                             <div class="panel-body">
                                 <p class="text-xl font-semibold text-slate-900" id="highlight-top-engagement">-</p>
@@ -297,15 +297,15 @@
                         <div class="panel"><div class="panel-header"><h3 class="panel-title">Engagement Metrics</h3></div><div class="panel-body"><div class="chart-container"><canvas id="engagement-canvas"></canvas></div></div></div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-                        <div class="panel"><div class="panel-header"><h3 class="panel-title">Top Comments by Video</h3></div><div class="panel-body"><div class="chart-container"><canvas id="comments-canvas"></canvas></div></div></div>
-                        <div class="panel"><div class="panel-header"><h3 class="panel-title">Views Trend Over Time</h3></div><div class="panel-body"><div class="chart-container"><canvas id="views-trend-canvas"></canvas></div></div></div>
+                        <div class="panel"><div class="panel-header"><h3 class="panel-title">Most-Discussed Videos</h3></div><div class="panel-body"><div class="chart-container"><canvas id="comments-canvas"></canvas></div></div></div>
+                        <div class="panel"><div class="panel-header"><h3 class="panel-title">Lifetime Views by Publish Date</h3></div><div class="panel-body"><div class="chart-container"><canvas id="views-trend-canvas"></canvas></div></div></div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-                        <div class="panel"><div class="panel-header"><h3 class="panel-title">Engagement Rate Trend</h3></div><div class="panel-body"><div class="chart-container"><canvas id="engagement-trend-canvas"></canvas></div></div></div>
-                        <div class="panel"><div class="panel-header"><h3 class="panel-title">CTR Proxy (Likes per View)</h3></div><div class="panel-body"><div class="chart-container"><canvas id="ctr-proxy-canvas"></canvas></div></div></div>
+                        <div class="panel"><div class="panel-header"><h3 class="panel-title">Engagement Rate per Video</h3></div><div class="panel-body"><div class="chart-container"><canvas id="engagement-trend-canvas"></canvas></div></div></div>
+                        <div class="panel"><div class="panel-header"><h3 class="panel-title">Like Rate (Top 8)</h3></div><div class="panel-body"><div class="chart-container"><canvas id="ctr-proxy-canvas"></canvas></div></div></div>
                     </div>
                     <div class="panel">
-                        <div class="panel-header"><h3 class="panel-title">Top 5% View Outliers</h3></div>
+                        <div class="panel-header"><h3 class="panel-title">View Outliers (Median + MAD)</h3></div>
                         <div class="panel-body"><div class="chart-container"><canvas id="outliers-canvas"></canvas></div></div>
                     </div>
                 </section>
@@ -341,7 +341,7 @@
 
                     <div id="video-advanced-charts-section" class="hidden grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
                         <div class="panel"><div class="panel-header"><h3 class="panel-title">Engagement Composition</h3></div><div class="panel-body"><div class="chart-container"><canvas id="video-composition-canvas"></canvas></div></div></div>
-                        <div class="panel"><div class="panel-header"><h3 class="panel-title">Benchmark vs Saved Videos</h3></div><div class="panel-body"><div class="chart-container"><canvas id="video-benchmark-canvas"></canvas></div></div></div>
+                        <div class="panel"><div class="panel-header"><h3 class="panel-title">Benchmark vs Channel Siblings</h3></div><div class="panel-body"><div class="chart-container"><canvas id="video-benchmark-canvas"></canvas></div></div></div>
                     </div>
 
                     <div id="video-insights-charts-section" class="hidden grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
@@ -350,10 +350,10 @@
                     </div>
 
                     <div id="video-trend-charts-section" class="hidden grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div class="panel"><div class="panel-header"><h3 class="panel-title">Trend vs Channel Average</h3></div><div class="panel-body"><div class="chart-container"><canvas id="video-channel-trend-canvas"></canvas></div></div></div>
+                        <div class="panel"><div class="panel-header"><h3 class="panel-title">This Video vs Channel</h3></div><div class="panel-body"><div class="chart-container"><canvas id="video-channel-trend-canvas"></canvas></div></div></div>
                         <div class="panel">
                             <div class="panel-header flex items-center justify-between">
-                                <h3 class="panel-title">Velocity Trend (Views vs Likes)</h3>
+                                <h3 class="panel-title">Velocity Since Publish</h3>
                                 <div class="flex items-center gap-2">
                                     <label for="video-rpm-input" class="text-xs text-slate-500">RPM (USD/1k views)</label>
                                     <input type="number" id="video-rpm-input" class="input-field h-8 w-20 text-xs" min="0" step="0.1" value="2.0">
@@ -428,9 +428,10 @@
 <!-- Toasts -->
 <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2 w-80"></div>
 
+<script src="/static/app.js"></script>
+<script src="/static/js/analytics-helpers.js"></script>
 <script src="/static/js/channel-charts.js"></script>
 <script src="/static/js/video-charts.js"></script>
-<script src="/static/app.js"></script>
 <script src="/static/js/ui-enhancements.js"></script>
 </body>
 </html>

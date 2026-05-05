@@ -5,12 +5,13 @@ managing YouTube channel and video data in PostgreSQL.
 """
 
 import logging
-from sqlalchemy import create_engine, Column, String, DateTime, Text, ForeignKey, Float, func
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
-from youtube_analytics.config import DB_URL
 from datetime import datetime, timezone
+
 from dateutil import parser as date_parser
+from sqlalchemy import Column, DateTime, Float, ForeignKey, String, Text, create_engine, func
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+
+from youtube_analytics.config import DB_URL  # noqa: F401  (kept for backwards compat)
 
 logger = logging.getLogger("youtube_analytics.db")
 
@@ -42,7 +43,7 @@ def parse_datetime(date_input):
 class Channel(Base):
     """Channel database model"""
     __tablename__ = "channels"
-    
+
     channel_id = Column(String(100), primary_key=True)
     title = Column(String(255), nullable=False)
     description = Column(Text)
@@ -57,7 +58,7 @@ class Channel(Base):
     last_searched_at = Column(DateTime)
 
     videos = relationship("Video", back_populates="channel", cascade="all, delete-orphan")
-    
+
     def to_dict(self):
         return {
             "channel_id": self.channel_id,
@@ -77,7 +78,7 @@ class Channel(Base):
 class Video(Base):
     """Video database model"""
     __tablename__ = "videos"
-    
+
     video_id = Column(String(100), primary_key=True)
     channel_id = Column(String(100), ForeignKey("channels.channel_id"), nullable=False)
     title = Column(String(255), nullable=False)
@@ -93,7 +94,7 @@ class Video(Base):
     last_searched_at = Column(DateTime)
 
     channel = relationship("Channel", back_populates="videos")
-    
+
     def to_dict(self):
         return {
             "video_id": self.video_id,
@@ -123,12 +124,13 @@ class ChannelSetting(Base):
 
 class DatabaseManager:
     """Manages database operations for channels and videos"""
-    
+
     def __init__(self):
         """Initialize database connection with proper error handling"""
         try:
-            from youtube_analytics.config import DB_ECHO, DB_URL as config_db_url
-            
+            from youtube_analytics.config import DB_ECHO
+            from youtube_analytics.config import DB_URL as config_db_url
+
             logger.info("Initializing database (url=%s)", config_db_url)
             self.engine = create_engine(config_db_url, echo=DB_ECHO)
 
@@ -159,7 +161,7 @@ class DatabaseManager:
         except Exception:
             logger.exception("Database initialization failed (url=%s)", config_db_url)
             raise
-    
+
     def add_channel(self, channel_data):
         """Add or update channel data with datetime conversion"""
         session = self.Session()
@@ -167,14 +169,14 @@ class DatabaseManager:
             # Filter channel_data to only include columns that exist in Channel model
             valid_fields = {col.name for col in Channel.__table__.columns}
             filtered_data = {k: v for k, v in channel_data.items() if k in valid_fields}
-            
+
             # Convert datetime strings to Python datetime objects
             if 'published_at' in filtered_data and filtered_data['published_at']:
                 filtered_data['published_at'] = parse_datetime(filtered_data['published_at'])
             filtered_data['last_searched_at'] = utcnow()
-            
+
             channel = session.query(Channel).filter_by(channel_id=channel_data["channel_id"]).first()
-            
+
             if channel:
                 # Update existing channel
                 for key, value in filtered_data.items():
@@ -183,7 +185,7 @@ class DatabaseManager:
                 # Create new channel with only valid columns
                 channel = Channel(**filtered_data)
                 session.add(channel)
-            
+
             session.commit()
             session.refresh(channel)
             logger.info("Channel saved: %s", channel_data['title'])
@@ -194,23 +196,23 @@ class DatabaseManager:
             return {"success": False, "error": str(e)}
         finally:
             session.close()
-    
+
     def add_video(self, video_data):
         """Add or update video data with datetime conversion"""
         session = self.Session()
         try:
             # Filter video_data to only include columns that exist in Video model
             valid_fields = {col.name for col in Video.__table__.columns}
-            
+
             filtered_data = {k: v for k, v in video_data.items() if k in valid_fields}
-            
+
             # Convert datetime strings to Python datetime objects
             if 'published_at' in filtered_data and filtered_data['published_at']:
                 filtered_data['published_at'] = parse_datetime(filtered_data['published_at'])
             filtered_data['last_searched_at'] = utcnow()
-            
+
             video = session.query(Video).filter_by(video_id=video_data["video_id"]).first()
-            
+
             if video:
                 # Update existing video
                 for key, value in filtered_data.items():
@@ -219,7 +221,7 @@ class DatabaseManager:
                 # Create new video with only valid columns
                 video = Video(**filtered_data)
                 session.add(video)
-            
+
             session.commit()
             session.refresh(video)  # Refresh to get the updated timestamp
             return {"success": True, "message": f"Video '{video_data['title']}' saved/updated"}
@@ -229,7 +231,7 @@ class DatabaseManager:
             return {"success": False, "error": str(e)}
         finally:
             session.close()
-    
+
     def get_channel(self, channel_id):
         """Get channel by ID"""
         session = self.Session()
@@ -247,7 +249,7 @@ class DatabaseManager:
             return video.to_dict() if video else None
         finally:
             session.close()
-    
+
     def get_all_channels(self):
         """Get all channels from database"""
         session = self.Session()
@@ -331,20 +333,20 @@ class DatabaseManager:
             return {"success": False, "error": str(e)}
         finally:
             session.close()
-    
+
     def get_statistics(self, channel_id):
         """Get aggregated statistics for a channel"""
         session = self.Session()
         try:
             videos = session.query(Video).filter_by(channel_id=channel_id).all()
-            
+
             if not videos:
                 return None
-            
+
             total_views = sum([int(v.views) if v.views != "Private" else 0 for v in videos])
             total_likes = sum([int(v.likes) if v.likes != "Private" else 0 for v in videos])
             total_comments = sum([int(v.comments) if v.comments != "Private" else 0 for v in videos])
-            
+
             return {
                 "total_videos": len(videos),
                 "total_views": total_views,

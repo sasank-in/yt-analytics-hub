@@ -1,6 +1,8 @@
-fastapi>=0.110
-uvicorn>=0.27
-sqlalchemy>=1.4
-python-dateutil>=2.8
-python-dotenv>=1.0
-google-api-python-client>=2.120
+# Dependencies are declared in pyproject.toml — this file remains for tooling
+# that doesn't yet read PEP 621 metadata.
+#
+#   pip install .            # runtime only
+#   pip install -e .[dev]    # editable + dev tools
+#
+# See pyproject.toml for the canonical dependency list.
+.

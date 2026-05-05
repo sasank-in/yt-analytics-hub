@@ -330,24 +330,35 @@ function updateDashboardHighlights(channels) {
     }
 
     const topChannel = [...channels].sort((a, b) => toNumber(b.subscribers) - toNumber(a.subscribers))[0];
-    const topEngagement = [...channels].map(c => {
+
+    // Highest avg views/video: previously called "Top Efficiency", but that
+    // implied a quality measure; this is just a per-video volume average.
+    const topAvgViews = [...channels].map(c => {
         const views = toNumber(c.total_views);
         const videos = toNumber(c.total_videos);
-        const rate = videos > 0 ? (views / videos) : 0;
-        return { title: c.title || 'Channel', rate };
-    }).sort((a, b) => b.rate - a.rate)[0];
+        return { title: c.title || 'Channel', avg: videos > 0 ? views / videos : 0 };
+    }).sort((a, b) => b.avg - a.avg)[0];
 
     const totalAudience = channels.reduce((sum, c) => sum + toNumber(c.subscribers), 0);
-    const totalViews = channels.reduce((sum, c) => sum + toNumber(c.total_views), 0);
-    const totalVideos = channels.reduce((sum, c) => sum + toNumber(c.total_videos), 0);
-    const avgViews = totalVideos > 0 ? Math.round(totalViews / totalVideos) : 0;
+
+    // Median views/video across channels (robust to a single viral channel
+    // dragging the mean up). Replaces the misleading mean-based "Avg Views/Video".
+    const perChannelAvg = channels
+        .map(c => {
+            const v = toNumber(c.total_videos);
+            return v > 0 ? toNumber(c.total_views) / v : null;
+        })
+        .filter(x => x !== null);
+    const medianAvgViews = window.Analytics
+        ? Math.round(window.Analytics.median(perChannelAvg))
+        : 0;
 
     if (topChannelEl) topChannelEl.textContent = topChannel?.title || '-';
     if (topChannelMetricEl) topChannelMetricEl.textContent = topChannel ? `${formatNumber(topChannel.subscribers)} subscribers` : '-';
-    if (topEngagementEl) topEngagementEl.textContent = topEngagement?.title || '-';
-    if (topEngagementMetricEl) topEngagementMetricEl.textContent = topEngagement ? `${formatNumber(Math.round(topEngagement.rate))} views/video` : '-';
+    if (topEngagementEl) topEngagementEl.textContent = topAvgViews?.title || '-';
+    if (topEngagementMetricEl) topEngagementMetricEl.textContent = topAvgViews ? `${formatNumber(Math.round(topAvgViews.avg))} views/video` : '-';
     if (totalAudienceEl) totalAudienceEl.textContent = formatNumber(totalAudience);
-    if (avgViewsEl) avgViewsEl.textContent = formatNumber(avgViews);
+    if (avgViewsEl) avgViewsEl.textContent = formatNumber(medianAvgViews);
 }
 
 // ==================== QUICK SELECT BOXES ====================
@@ -1203,12 +1214,12 @@ function displayVideoAnalytics(video) {
     `;
 
     // Draw the 6 video-detail charts. Chart helpers handle null canvases gracefully.
-    const data = { likes, comments, views };
+    const data = { likes, comments, views, video_id: video.video_id };
     const drawSafe = (fn, ...args) => {
         try { fn(...args); } catch (e) { console.warn('Chart draw failed:', e.message); }
     };
     drawSafe(window.VideoCharts.drawVideoCompositionChart, document.getElementById('video-composition-canvas'), data);
-    drawSafe(window.VideoCharts.drawVideoBenchmarkChart, document.getElementById('video-benchmark-canvas'), data);
+    drawSafe(window.VideoCharts.drawVideoBenchmarkChart, document.getElementById('video-benchmark-canvas'), data, currentChannelVideos);
     drawSafe(window.VideoCharts.drawVideoEngagementRateChart, document.getElementById('video-engagement-rate-canvas'), data);
     drawSafe(window.VideoCharts.drawVideoPercentileChart, document.getElementById('video-percentile-canvas'), data);
     drawSafe(window.VideoCharts.drawVideoChannelTrendChart, document.getElementById('video-channel-trend-canvas'), video, currentChannelVideos);

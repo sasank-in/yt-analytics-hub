@@ -5,8 +5,10 @@ using the official YouTube Data API v3.
 """
 
 import json
+
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+
 from youtube_analytics.config import YOUTUBE_API_KEY
 
 
@@ -33,7 +35,7 @@ def _humanize_error(exc: Exception) -> str:
 
 class YouTubeFetcher:
     """Fetch YouTube channel and video data from YouTube API v3"""
-    
+
     def __init__(self):
         """Initialize YouTube API client"""
         if not YOUTUBE_API_KEY:
@@ -43,7 +45,7 @@ class YouTubeFetcher:
             version="v3",
             developerKey=YOUTUBE_API_KEY
         )
-    
+
     def get_channel_by_id(self, channel_id):
         """Fetch channel data by channel ID"""
         try:
@@ -55,7 +57,7 @@ class YouTubeFetcher:
             return self._parse_response(response)
         except Exception as e:
             return {"error": _humanize_error(e)}
-    
+
     def get_channel_videos(self, channel_id, max_results=None):
         """Fetch videos from a channel. If max_results is None, fetch all."""
         try:
@@ -65,16 +67,16 @@ class YouTubeFetcher:
                 id=channel_id
             )
             channel_response = channel_request.execute()
-            
+
             if not channel_response.get('items'):
                 return {"error": "Channel not found"}
-            
+
             uploads_playlist_id = channel_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
-            
+
             # Get videos from uploads playlist
             videos = []
             next_page_token = None
-            
+
             while True:
                 playlist_request = self.youtube.playlistItems().list(
                     part="snippet",
@@ -83,13 +85,13 @@ class YouTubeFetcher:
                     pageToken=next_page_token
                 )
                 playlist_response = playlist_request.execute()
-                
+
                 # Check if there are items in the response
                 if not playlist_response.get('items'):
                     break  # No more videos
-                
+
                 video_ids = [item['snippet']['resourceId']['videoId'] for item in playlist_response['items']]
-                
+
                 # Only fetch if we have video IDs
                 if video_ids:
                     # Get video statistics
@@ -98,18 +100,18 @@ class YouTubeFetcher:
                         id=','.join(video_ids)
                     )
                     videos_response = videos_request.execute()
-                    
+
                     for video in videos_response.get('items', []):
                         parsed = self._parse_video_response({'items': [video]})
                         if "error" not in parsed:
                             videos.append(parsed)
-                
+
                 next_page_token = playlist_response.get('nextPageToken')
                 if not next_page_token:
                     break
                 if max_results and len(videos) >= max_results:
                     break
-            
+
             # Return empty list if no videos, not error
             return videos if videos else []
         except Exception as e:
@@ -168,7 +170,7 @@ class YouTubeFetcher:
             if return_debug:
                 return {"error": _humanize_error(e), "debug": {"channel_id": channel_id, "max_results": max_results}}
             return {"error": _humanize_error(e)}
-    
+
     def get_channel_by_username(self, username):
         """Fetch channel data by username"""
         try:
@@ -180,7 +182,7 @@ class YouTubeFetcher:
             return self._parse_response(response)
         except Exception as e:
             return {"error": _humanize_error(e)}
-    
+
     def get_channel_by_name(self, channel_name):
         """Fetch channel data by searching channel name"""
         try:
@@ -191,7 +193,7 @@ class YouTubeFetcher:
                 maxResults=1
             )
             search_response = search_request.execute()
-            
+
             if search_response['items']:
                 channel_id = search_response['items'][0]['id']['channelId']
                 return self.get_channel_by_id(channel_id)
@@ -199,7 +201,7 @@ class YouTubeFetcher:
                 return {"error": f"Channel '{channel_name}' not found"}
         except Exception as e:
             return {"error": _humanize_error(e)}
-    
+
     def get_video_by_id(self, video_id):
         """Fetch video data by video ID"""
         try:
@@ -211,7 +213,7 @@ class YouTubeFetcher:
             return self._parse_video_response(response)
         except Exception as e:
             return {"error": _humanize_error(e)}
-    
+
     def get_video_by_title(self, title, channel_id=None):
         """Fetch video data by searching video title"""
         try:
@@ -223,10 +225,10 @@ class YouTubeFetcher:
             }
             if channel_id:
                 search_params["channelId"] = channel_id
-            
+
             search_request = self.youtube.search().list(**search_params)
             search_response = search_request.execute()
-            
+
             if search_response['items']:
                 video_id = search_response['items'][0]['id']['videoId']
                 return self.get_video_by_id(video_id)
@@ -234,14 +236,14 @@ class YouTubeFetcher:
                 return {"error": f"Video '{title}' not found"}
         except Exception as e:
             return {"error": _humanize_error(e)}
-    
+
     def _parse_response(self, response):
         """Parse and format channel API response"""
         if not response.get('items'):
             return {"error": "No channel data found"}
-        
+
         channel = response['items'][0]
-        
+
         stats = {
             "channel_id": channel['id'],
             "title": channel['snippet']['title'],
@@ -254,17 +256,17 @@ class YouTubeFetcher:
             "profile_image": channel['snippet']['thumbnails']['default']['url'],
             "banner_image": channel['snippet']['thumbnails'].get('high', {}).get('url', 'N/A')
         }
-        
+
         return stats
-    
+
     def _parse_video_response(self, response):
         """Parse and format video API response"""
         if not response.get('items'):
             return {"error": "No video data found"}
-        
+
         video = response['items'][0]
         duration = video['contentDetails']['duration']
-        
+
         stats = {
             "video_id": video['id'],
             "title": video['snippet']['title'],
@@ -278,5 +280,5 @@ class YouTubeFetcher:
             "comments": video['statistics'].get('commentCount', 'Private'),
             "thumbnail": video['snippet']['thumbnails']['high']['url']
         }
-        
+
         return stats

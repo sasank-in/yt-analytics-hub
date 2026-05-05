@@ -3,28 +3,36 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "youtube-analytics"
+name = "creatorscope"
 version = "2.0.0"
-description = "Self-hosted YouTube channel and video analytics platform (FastAPI + SQLite)."
+description = "Creatorscope — a self-hosted YouTube analytics workbench. FastAPI + SQLite, with channel/video search, engagement metrics, and earnings estimates."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "sasank-in" }]
-keywords = ["youtube", "analytics", "fastapi", "dashboard"]
+keywords = ["youtube", "analytics", "fastapi", "dashboard", "creator-economy"]
 classifiers = [
+    "Development Status :: 4 - Beta",
     "Framework :: FastAPI",
-    "Programming Language :: Python :: 3",
+    "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Office/Business",
 ]
 
 dependencies = [
     "fastapi>=0.110",
-    "uvicorn>=0.27",
-    "sqlalchemy>=1.4",
+    "uvicorn[standard]>=0.27",
+    "sqlalchemy>=2.0",
     "python-dateutil>=2.8",
     "python-dotenv>=1.0",
     "google-api-python-client>=2.120",
+    "pydantic>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -32,12 +40,12 @@ dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "httpx>=0.27",
-    "black>=22.0",
     "ruff>=0.4",
 ]
 
 [project.urls]
-Repository = "https://github.com/sasank-in/youtube-analytics"
+Repository = "https://github.com/sasank-in/creatorscope"
+Issues = "https://github.com/sasank-in/creatorscope/issues"
 
 [tool.setuptools.packages.find]
 include = ["youtube_analytics*"]
@@ -54,3 +62,35 @@ youtube_analytics = [
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-q"
+filterwarnings = [
+    "ignore::DeprecationWarning:sqlalchemy.*",
+    "ignore::DeprecationWarning:google.*",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [
+    "youtube_analytics/static",
+    "youtube_analytics/templates",
+    "data",
+    "scripts",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # bugbear
+    "UP",  # pyupgrade
+    "W",   # pycodestyle warnings
+    "SIM", # simplify
+]
+ignore = [
+    "E501",  # line length handled elsewhere
+    "B008",  # FastAPI Depends() in defaults is normal
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]
