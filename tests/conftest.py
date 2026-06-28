@@ -16,6 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # These must be set BEFORE any application module is imported.
 os.environ.setdefault("YOUTUBE_API_KEY", "test-key-do-not-use")
 os.environ.setdefault("LOG_LEVEL", "WARNING")
+# Disable rate limiting for the test suite — we exceed limits intentionally
+# when seeding fixtures and we don't want flaky 429s.
+os.environ["RATE_LIMIT_DISABLED"] = "1"
 
 import pytest  # noqa: E402
 

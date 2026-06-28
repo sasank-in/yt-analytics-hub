@@ -3,16 +3,21 @@ services:
     build: .
     container_name: creatorscope
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    # In production we don't expose the app port directly — Caddy proxies it.
+    # For local-only dev (no Caddy), uncomment the `ports:` block below.
+    expose:
+      - "8000"
+    # ports:
+    #   - "8000:8000"
     environment:
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:?set YOUTUBE_API_KEY in your shell or .env}
+      APP_API_KEY: ${APP_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      HOST: 0.0.0.0
       CHANNEL_REFRESH_SECONDS: ${CHANNEL_REFRESH_SECONDS:-86400}
       TOP_VIDEOS_LIMIT: ${TOP_VIDEOS_LIMIT:-50}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,https://localhost}
     volumes:
-      # SQLite DB persists across container restarts.
       - ./data:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=3).status==200 else 1)"]
@@ -20,3 +25,24 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      CREATORSCOPE_DOMAIN: ${CREATORSCOPE_DOMAIN:-localhost}
+    depends_on:
+      creatorscope:
+        condition: service_healthy
+
+volumes:
+  caddy_data:
+  caddy_config:

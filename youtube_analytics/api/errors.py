@@ -10,6 +10,7 @@ def register(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content={"error": exc.detail, "status_code": exc.status_code},
+            headers=exc.headers or None,
         )
 
     @app.exception_handler(Exception)

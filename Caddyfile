@@ -1,0 +1,37 @@
+# Caddyfile for Creatorscope.
+#
+# Default config terminates HTTPS automatically via Let's Encrypt and proxies
+# to the FastAPI container. Set CREATORSCOPE_DOMAIN in your environment before
+# running `docker compose --profile prod up` (production) — without it, Caddy
+# falls back to a local self-signed cert on localhost (good for testing).
+#
+# Local override:
+#   export CREATORSCOPE_DOMAIN=localhost
+#
+# Production:
+#   export CREATORSCOPE_DOMAIN=analytics.example.com
+
+{$CREATORSCOPE_DOMAIN:localhost} {
+	# Security headers — sensible defaults; tighten CSP if you stop using
+	# the Tailwind CDN.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Server identification — strip
+		-Server
+	}
+
+	# Compress responses (Caddy handles the negotiation).
+	encode zstd gzip
+
+	# Forward everything to the FastAPI service inside the Docker network.
+	reverse_proxy creatorscope:8000
+
+	# Access log to stdout for `docker logs caddy`.
+	log {
+		output stdout
+		format console
+	}
+}

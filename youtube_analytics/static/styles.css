@@ -469,3 +469,131 @@ select.input-field {
     background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover { background: #cbd5e1; background-clip: padding-box; }
+
+/* ============================================================
+   Advanced analytics components
+   ============================================================ */
+
+.aa-sub-h {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #475569;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 0 0 0.5rem;
+}
+
+.aa-stat-row {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+.aa-stat-row span { white-space: nowrap; }
+
+.aa-bar-row {
+    display: grid;
+    grid-template-columns: 110px 1fr 48px;
+    align-items: center;
+    gap: 0.5rem;
+}
+.aa-bar-label {
+    font-size: 0.75rem;
+    color: #64748b;
+    text-transform: capitalize;
+}
+.aa-bar-track {
+    height: 8px;
+    background-color: #f1f5f9;
+    border-radius: 999px;
+    overflow: hidden;
+}
+.aa-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6, #2563eb);
+    border-radius: 999px;
+    transition: width 400ms ease-out;
+}
+.aa-bar-value {
+    font-size: 0.75rem;
+    color: #0f172a;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Heatmap weekday bars */
+.aa-heat-bars { display: flex; flex-direction: column; gap: 0.375rem; }
+.aa-heat-day {
+    display: grid;
+    grid-template-columns: 40px 1fr 32px;
+    align-items: center;
+    gap: 0.5rem;
+}
+.aa-heat-label { font-size: 0.75rem; color: #475569; font-weight: 600; }
+.aa-heat-track { height: 14px; background-color: #f1f5f9; border-radius: 4px; overflow: hidden; }
+.aa-heat-fill { height: 100%; background-color: #2563eb; border-radius: 4px; }
+.aa-heat-value { font-size: 0.75rem; color: #475569; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Hour-of-day grid */
+.aa-hour-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 2px;
+}
+.aa-hour-cell {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    color: rgba(15, 23, 42, 0.7);
+    font-size: 0.625rem;
+    cursor: default;
+    font-variant-numeric: tabular-nums;
+}
+.aa-hour-cell:hover { outline: 1px solid #1d4ed8; }
+.aa-hour-cell.aa-best { outline: 2px solid #b08530; box-shadow: 0 0 0 1px rgba(176, 133, 48, 0.4) inset; }
+.aa-heat-day.aa-best .aa-heat-fill { background-color: #b08530; }
+.aa-heat-day.aa-best .aa-heat-label { color: #92400e; font-weight: 700; }
+
+/* Earnings cone */
+.aa-earnings-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.5rem;
+    text-align: center;
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.aa-earnings-low { color: #94a3b8; }
+.aa-earnings-mid { color: #0f172a; }
+.aa-earnings-high { color: #15803d; }
+.aa-earnings-bar {
+    margin-top: 0.5rem;
+    height: 8px;
+    background: linear-gradient(90deg, #cbd5e1 0%, #2563eb 50%, #15803d 100%);
+    border-radius: 999px;
+    position: relative;
+}
+.aa-earnings-fill {
+    position: absolute;
+    left: 50%;
+    top: -2px;
+    height: 12px;
+    width: 4px;
+    background-color: #0f172a;
+    border-radius: 2px;
+    transform: translateX(-50%);
+}
+
+/* Composite ranking */
+.aa-rank-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    background-color: #eff6ff;
+    color: #1d4ed8;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}

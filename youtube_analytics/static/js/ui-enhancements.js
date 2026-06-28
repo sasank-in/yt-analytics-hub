@@ -10,8 +10,41 @@
         wireChannelsFilterSort();
         wireSettingsFilters();
         wireSettingsTableActions();
+        wireSidebarToggle();
         markActiveNav();
     });
+
+    // ---------- Mobile sidebar ----------
+    function wireSidebarToggle() {
+        const toggle = document.getElementById('sidebar-toggle');
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebar-overlay');
+        if (!toggle || !sidebar) return;
+
+        const close = () => {
+            sidebar.classList.add('-translate-x-full');
+            sidebar.classList.remove('translate-x-0');
+            if (overlay) overlay.classList.add('hidden');
+        };
+        const open = () => {
+            sidebar.classList.remove('-translate-x-full');
+            sidebar.classList.add('translate-x-0');
+            if (overlay) overlay.classList.remove('hidden');
+        };
+
+        toggle.addEventListener('click', () => {
+            const isOpen = !sidebar.classList.contains('-translate-x-full');
+            isOpen ? close() : open();
+        });
+        if (overlay) overlay.addEventListener('click', close);
+
+        // Auto-close after picking a nav item (mobile only — we infer mobile by overlay visibility)
+        document.querySelectorAll('.nav-btn').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                if (overlay && !overlay.classList.contains('hidden')) close();
+            });
+        });
+    }
 
     // ---------- Hash routing ----------
     function wireHashRouting() {

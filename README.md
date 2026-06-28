@@ -87,11 +87,24 @@ creatorscope/
 ```bash
 git clone https://github.com/sasank-in/creatorscope.git
 cd creatorscope
-echo "YOUTUBE_API_KEY=your_key_here" > .env
+cat > .env <<EOF
+YOUTUBE_API_KEY=your_key_here
+APP_API_KEY=optional_shared_password_for_protected_deploys
+CREATORSCOPE_DOMAIN=localhost
+EOF
 docker compose up
 ```
 
-Open http://localhost:8000.
+The default compose file starts both the FastAPI app and a **Caddy** reverse
+proxy with automatic HTTPS. Open https://localhost (accept the self-signed
+cert) or set `CREATORSCOPE_DOMAIN=analytics.example.com` for real LE certs.
+
+For a production deploy on a public domain:
+```bash
+export CREATORSCOPE_DOMAIN=analytics.example.com
+export APP_API_KEY="$(openssl rand -hex 32)"
+docker compose up -d
+```
 
 ### Run locally with Python
 
@@ -119,13 +132,19 @@ All settings come from environment variables (read by [config.py](youtube_analyt
 | Variable | Default | Description |
 |---|---|---|
 | `YOUTUBE_API_KEY` | *(required)* | YouTube Data API v3 key |
+| `APP_API_KEY` | *(empty)* | When set, all `/api/*` calls (except `/api/health`) require `X-API-Key: <value>`. Frontend prompts on 401 and caches in `localStorage`. |
 | `DATABASE_URL` | `sqlite:///data/youtube_analytics.db` | Full SQLAlchemy URL; set for Postgres |
 | `HOST` | `127.0.0.1` | Bind address (`0.0.0.0` for Docker / LAN) |
 | `CORS_ORIGINS` | `http://localhost:8000,http://127.0.0.1:8000` | Comma-separated allowlist |
 | `CHANNEL_REFRESH_SECONDS` | `86400` | Skip YouTube refetch within this window |
 | `TOP_VIDEOS_LIMIT` | `50` | Max videos fetched per channel |
+| `RATE_LIMIT_CHANNEL_SEARCH` | `30/minute` | Per-IP cap on `POST /api/channel/search` |
+| `RATE_LIMIT_VIDEO_SEARCH` | `60/minute` | Per-IP cap on `/api/video/search` |
+| `RATE_LIMIT_VIDEOS_FETCH` | `10/minute` | Per-IP cap on `POST /api/channel/{id}/videos/fetch` |
+| `RATE_LIMIT_DISABLED` | `0` | Set to `1` to turn the limiter off (used by tests) |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `DB_ECHO` | `False` | Log every SQL statement |
+| `CREATORSCOPE_DOMAIN` | `localhost` | Domain Caddy terminates HTTPS for (compose only) |
 
 ## API endpoints
 
@@ -149,7 +168,8 @@ Routes are grouped by resource and mounted under `/api`. Health: `GET /api/healt
 - `DELETE /api/video/{video_id}`
 
 ### Statistics
-- `GET /api/statistics/{channel_id}`
+- `GET /api/statistics/{channel_id}` — totals & per-video averages
+- `GET /api/channel/{channel_id}/analytics` — **advanced analytics bundle**: publishing cadence, weekday/hour publish pattern, engagement-vs-views Pearson r, title-length impact, channel health score (0–100), power-law decay fit, earnings cone with ±30 % band, top-5 composite ranking
 
 Interactive OpenAPI docs live at http://127.0.0.1:8000/docs.
 

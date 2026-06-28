@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Creatorscope — YouTube Analytics</title>
     <link rel="icon" href="/static/favicon.ico">
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tailwind via CDN. Pinned to 3.x for stability; for production
+         migrate to the Tailwind CLI build (drops ~3 MB of JIT compiler). -->
+    <script src="https://cdn.tailwindcss.com/3.4.16"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -38,8 +40,11 @@
 
 <div class="flex h-screen overflow-hidden">
 
+    <!-- Mobile sidebar overlay -->
+    <div id="sidebar-overlay" class="fixed inset-0 bg-slate-900/40 z-30 hidden md:hidden"></div>
+
     <!-- ============ Sidebar ============ -->
-    <aside id="sidebar" class="w-64 shrink-0 bg-white border-r border-slate-200 flex flex-col">
+    <aside id="sidebar" class="w-64 shrink-0 bg-white border-r border-slate-200 flex flex-col fixed md:static inset-y-0 left-0 z-40 -translate-x-full md:translate-x-0 transition-transform duration-200">
         <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
             <div class="flex items-center gap-2.5 min-w-0">
                 <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-brand-600 to-brand-700 flex items-center justify-center text-white shadow-sm shrink-0">
@@ -102,16 +107,19 @@
     <div class="flex-1 flex flex-col overflow-hidden">
 
         <!-- Top Bar -->
-        <header class="h-14 shrink-0 bg-white border-b border-slate-200 flex items-center justify-between px-6">
+        <header class="h-14 shrink-0 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-6">
             <div class="flex items-center gap-3 min-w-0">
+                <button id="sidebar-toggle" class="md:hidden btn btn-ghost h-9 w-9 p-0" aria-label="Toggle menu">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
                 <h1 id="page-title" class="text-base font-semibold text-slate-900 truncate">Dashboard</h1>
-                <span id="page-breadcrumb" class="text-sm text-slate-400 truncate"></span>
+                <span id="page-breadcrumb" class="text-sm text-slate-400 truncate hidden sm:inline"></span>
             </div>
             <div class="flex items-center gap-2">
                 <div class="relative">
                     <svg class="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-                    <input id="global-search" type="text" placeholder="Filter saved channels  (press /)"
-                           class="w-72 h-9 pl-8 pr-3 text-sm bg-slate-100 border border-transparent rounded-md focus:bg-white focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition">
+                    <input id="global-search" type="text" placeholder="Filter channels…"
+                           class="w-40 sm:w-72 h-9 pl-8 pr-3 text-sm bg-slate-100 border border-transparent rounded-md focus:bg-white focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition">
                 </div>
             </div>
         </header>
@@ -308,6 +316,111 @@
                         <div class="panel-header"><h3 class="panel-title">View Outliers (Median + MAD)</h3></div>
                         <div class="panel-body"><div class="chart-container"><canvas id="outliers-canvas"></canvas></div></div>
                     </div>
+
+                    <!-- ============ Advanced Analytics ============ -->
+                    <div id="advanced-analytics" class="mt-6 hidden">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="text-lg font-semibold text-slate-900">Advanced analytics</h3>
+                            <span class="text-xs text-slate-500">Statistical breakdown</span>
+                        </div>
+
+                        <!-- Key insights: plain-language summary at the top -->
+                        <div class="panel mb-4 border-l-4 border-brand-500">
+                            <div class="panel-header"><h4 class="panel-title">Key insights</h4></div>
+                            <div class="panel-body">
+                                <ul id="aa-insights" class="space-y-2 text-sm text-slate-700"></ul>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+                            <!-- Health score -->
+                            <div class="panel">
+                                <div class="panel-header"><h4 class="panel-title">Channel Health</h4></div>
+                                <div class="panel-body">
+                                    <p id="aa-health-score" class="text-5xl font-bold text-slate-900 tabular-nums">–</p>
+                                    <p id="aa-health-sub" class="text-xs text-slate-500 mt-1">Loading…</p>
+                                    <div id="aa-health-bars" class="mt-4 space-y-2"></div>
+                                </div>
+                            </div>
+                            <!-- Correlation -->
+                            <div class="panel">
+                                <div class="panel-header"><h4 class="panel-title">Engagement ↔ Views</h4></div>
+                                <div class="panel-body">
+                                    <p id="aa-corr-r" class="text-5xl font-bold text-slate-900 tabular-nums">–</p>
+                                    <p class="text-xs text-slate-500 mt-1">Pearson r (engagement % vs log-views)</p>
+                                    <p id="aa-corr-interp" class="text-sm text-slate-600 mt-3"></p>
+                                </div>
+                            </div>
+                            <!-- Decay model -->
+                            <div class="panel">
+                                <div class="panel-header"><h4 class="panel-title">Lifetime Decay Fit</h4></div>
+                                <div class="panel-body">
+                                    <div class="flex items-baseline gap-4">
+                                        <p class="text-xs text-slate-500 uppercase tracking-wide">Exponent</p>
+                                        <p id="aa-decay-exp" class="text-3xl font-bold text-slate-900 tabular-nums">–</p>
+                                        <p class="text-xs text-slate-500 uppercase tracking-wide ml-3">R²</p>
+                                        <p id="aa-decay-r2" class="text-3xl font-bold text-slate-900 tabular-nums">–</p>
+                                    </div>
+                                    <p id="aa-decay-interp" class="text-sm text-slate-600 mt-3"></p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+                            <!-- Cadence histogram -->
+                            <div class="panel">
+                                <div class="panel-header"><h4 class="panel-title">Publishing Cadence</h4></div>
+                                <div class="panel-body">
+                                    <div id="aa-cadence-stats" class="aa-stat-row text-sm text-slate-600 mb-3"></div>
+                                    <div class="chart-container" style="height: 220px;"><canvas id="aa-cadence-canvas"></canvas></div>
+                                </div>
+                            </div>
+                            <!-- Heatmap -->
+                            <div class="panel">
+                                <div class="panel-header"><h4 class="panel-title">When This Channel Publishes</h4></div>
+                                <div class="panel-body">
+                                    <div id="aa-heatmap" class="space-y-4"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+                            <!-- Title length -->
+                            <div class="panel">
+                                <div class="panel-header"><h4 class="panel-title">Title Length Impact</h4></div>
+                                <div class="panel-body">
+                                    <div class="chart-container" style="height: 220px;"><canvas id="aa-title-canvas"></canvas></div>
+                                    <p id="aa-title-note" class="text-xs text-slate-500 mt-2"></p>
+                                </div>
+                            </div>
+                            <!-- Earnings cone -->
+                            <div class="panel">
+                                <div class="panel-header"><h4 class="panel-title">Lifetime Earnings Cone</h4></div>
+                                <div class="panel-body">
+                                    <div id="aa-earnings"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Composite ranking table -->
+                        <div class="panel">
+                            <div class="panel-header"><h4 class="panel-title">Top 5 by Composite Score</h4></div>
+                            <div class="panel-body">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Rank</th>
+                                            <th>Title</th>
+                                            <th class="num">Score</th>
+                                            <th class="num">Views %ile</th>
+                                            <th class="num">Engagement %ile</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="aa-composite-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
                 </section>
 
                 <!-- ============ Video Analytics ============ -->
@@ -432,6 +545,7 @@
 <script src="/static/js/analytics-helpers.js"></script>
 <script src="/static/js/channel-charts.js"></script>
 <script src="/static/js/video-charts.js"></script>
+<script src="/static/js/advanced-analytics.js"></script>
 <script src="/static/js/ui-enhancements.js"></script>
 </body>
 </html>

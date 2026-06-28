@@ -612,7 +612,12 @@ async function selectChannel(channelId) {
         
         // Load videos
         await loadChannelVideos(channelId);
-        
+
+        // Fire-and-forget: advanced analytics block can take a moment to compute
+        if (window.AdvancedAnalytics) {
+            window.AdvancedAnalytics.render(channelId);
+        }
+
         // Show channel details view
         document.querySelectorAll('.section').forEach(s => s.classList.add('hidden'));
         document.getElementById('channel-details').classList.remove('hidden');
@@ -834,8 +839,9 @@ async function loadSettingsChannels() {
     const container = document.getElementById('settings-channels-table');
     if (!container) return;
     try {
-        const response = await fetchAPI('/channels');
-        _settingsChannels = response.channels || [];
+        // Pull up to the server's max page size; client-side filter spans all.
+        const response = await fetchAPI('/channels?page=1&size=200');
+        _settingsChannels = response.items || response.channels || [];
         renderSettingsChannels();
     } catch (e) {
         container.innerHTML = '<p class="placeholder">Failed to load channels</p>';
@@ -913,8 +919,8 @@ async function loadSettingsVideos() {
     const container = document.getElementById('settings-videos-table');
     if (!container) return;
     try {
-        const response = await fetchAPI('/videos');
-        _settingsVideos = response.videos || [];
+        const response = await fetchAPI('/videos?page=1&size=200');
+        _settingsVideos = response.items || response.videos || [];
         renderSettingsVideos();
     } catch (e) {
         container.innerHTML = '<p class="placeholder">Failed to load videos</p>';
@@ -1010,25 +1016,59 @@ async function deleteVideoById(videoId) {
 
 // ==================== API CALLS ====================
 
+// Storage key for the user-supplied X-API-Key.
+const API_KEY_STORAGE = 'creatorscope_api_key';
+
+function getStoredApiKey() {
+    try { return localStorage.getItem(API_KEY_STORAGE) || ''; } catch (_e) { return ''; }
+}
+
+function setStoredApiKey(key) {
+    try { localStorage.setItem(API_KEY_STORAGE, key || ''); } catch (_e) { /* ignore */ }
+}
+
 async function fetchAPI(endpoint, options = {}) {
     const url = `${API_BASE_URL}${endpoint}`;
-    
+    const apiKey = getStoredApiKey();
     const config = {
         method: options.method || 'GET',
         headers: {
             'Content-Type': 'application/json',
-            ...options.headers
+            ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+            ...options.headers,
         },
-        ...options
+        ...options,
     };
 
     const response = await fetch(url, config);
 
-    if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || `API error: ${response.status}`);
+    if (response.status === 401) {
+        // Server requires a key (or yours is wrong). Prompt and retry once.
+        const provided = window.prompt(
+            'This instance requires an API key. Enter your X-API-Key (will be stored in localStorage):',
+            apiKey,
+        );
+        if (provided !== null) {
+            setStoredApiKey(provided.trim());
+            // Single retry with the new key
+            const retryConfig = {
+                ...config,
+                headers: { ...config.headers, 'X-API-Key': provided.trim() },
+            };
+            const retry = await fetch(url, retryConfig);
+            if (!retry.ok) {
+                const err = await retry.json().catch(() => ({}));
+                throw new Error(err.error || err.detail || `API error: ${retry.status}`);
+            }
+            return await retry.json();
+        }
+        throw new Error('API key required');
     }
 
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || error.detail || `API error: ${response.status}`);
+    }
     return await response.json();
 }
 
@@ -1371,6 +1411,7 @@ window.formatDate = formatDate;
 window.getSavedBenchmarks = getSavedBenchmarks;
 window.showSection = showSection;
 window.selectChannel = selectChannel;
+window.fetchAPI = fetchAPI;
 
 // ==================== ERROR HANDLING ====================
 

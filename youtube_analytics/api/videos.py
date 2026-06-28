@@ -1,10 +1,13 @@
 """Video routes: search (POST + GET), detail, list, delete."""
 
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from .deps import get_db, get_fetcher
+from .pagination import page_params, paginate
+from .rate_limit import LIMITS, limiter
 from .schemas import VideoSearch
 
 logger = logging.getLogger("creatorscope.api")
@@ -22,12 +25,14 @@ def _search_video_by_id(video_id: str) -> dict:
 
 
 @router.post("/video/search")
-async def search_video(video: VideoSearch):
+@limiter.limit(LIMITS["video_search"])
+async def search_video(request: Request, video: Annotated[VideoSearch, Body()]):
     return _search_video_by_id(video.video_id)
 
 
 @router.get("/video/search")
-async def search_video_get(q: str):
+@limiter.limit(LIMITS["video_search"])
+async def search_video_get(request: Request, q: str):
     return _search_video_by_id(q)
 
 
@@ -40,8 +45,16 @@ async def get_video_details(video_id: str):
 
 
 @router.get("/videos")
-async def get_all_videos():
-    return {"videos": (rows := get_db().get_all_videos()), "count": len(rows)}
+async def get_all_videos(paging: tuple[int, int] = Depends(page_params)):
+    """List all saved videos.
+
+    Paginated; response includes both legacy `videos`/`count` keys and the
+    new `items`/`total`/`page`/`pages`/`size` envelope.
+    """
+    rows = get_db().get_all_videos()
+    page, size = paging
+    p = paginate(rows, page, size)
+    return {"videos": p["items"], "count": p["total"], **p}
 
 
 @router.delete("/video/{video_id}")

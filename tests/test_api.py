@@ -125,6 +125,25 @@ def test_rpm_put_persists_value(app_client, fake_fetcher, sample_channel):
     assert get.json()["rpm"] == 4.25
 
 
+def test_channel_analytics_returns_404_when_missing(app_client):
+    assert app_client.get("/api/channel/UCnope/analytics").status_code == 404
+
+
+def test_channel_analytics_returns_schema(app_client, fake_fetcher, sample_channel):
+    fake_fetcher.get_channel_by_name.return_value = sample_channel
+    app_client.post("/api/channel/search", json={"query": "x", "search_type": "name"})
+
+    r = app_client.get(f"/api/channel/{sample_channel['channel_id']}/analytics")
+    assert r.status_code == 200
+    body = r.json()
+    expected = {"sample_size", "cadence", "publish_pattern", "best_slot",
+                "engagement_vs_views", "title_length", "health_score", "decay",
+                "earnings_cone", "composite_ranking", "insights"}
+    assert set(body.keys()) == expected
+    # Insights map carries plain-language conclusions
+    assert "cadence" in body["insights"]
+
+
 def test_delete_channel(app_client, fake_fetcher, sample_channel):
     fake_fetcher.get_channel_by_name.return_value = sample_channel
     app_client.post("/api/channel/search", json={"query": "x", "search_type": "name"})

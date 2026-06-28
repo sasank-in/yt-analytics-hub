@@ -1,14 +1,17 @@
 """Channel routes: search, list, detail, delete, RPM, video sub-routes."""
 
-from __future__ import annotations
-
 import logging
 from datetime import datetime, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Request
+
+from youtube_analytics.analytics import compute_channel_analytics
 
 from .background import fetch_channel_videos
 from .deps import CHANNEL_REFRESH_SECONDS, get_db, get_fetcher
+from .pagination import page_params, paginate
+from .rate_limit import LIMITS, limiter
 from .schemas import ChannelSearch, RPMUpdate
 
 logger = logging.getLogger("creatorscope.api")
@@ -32,7 +35,12 @@ def _is_fresh(fetched_at) -> bool:
 
 
 @router.post("/channel/search")
-async def search_channel(search: ChannelSearch, background_tasks: BackgroundTasks):
+@limiter.limit(LIMITS["channel_search"])
+async def search_channel(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    search: Annotated[ChannelSearch, Body()],
+):
     """Search a channel by ID or name.
 
     Idempotent: returns the cached row when last fetched within
@@ -65,8 +73,16 @@ async def search_channel(search: ChannelSearch, background_tasks: BackgroundTask
 
 
 @router.get("/channels")
-async def get_all_channels():
-    return {"channels": (rows := get_db().get_all_channels()), "count": len(rows)}
+async def get_all_channels(paging: tuple[int, int] = Depends(page_params)):
+    """List all saved channels.
+
+    Paginated; response includes both legacy `channels`/`count` keys for
+    older clients and the new `items`/`total`/`page`/`pages`/`size` envelope.
+    """
+    rows = get_db().get_all_channels()
+    page, size = paging
+    p = paginate(rows, page, size)
+    return {"channels": p["items"], "count": p["total"], **p}
 
 
 @router.get("/channel/{channel_id}")
@@ -85,7 +101,9 @@ async def get_channel_details(channel_id: str):
 
 
 @router.post("/channel/{channel_id}/videos/fetch")
+@limiter.limit(LIMITS["videos_fetch"])
 async def fetch_channel_videos_endpoint(
+    request: Request,
     channel_id: str,
     background_tasks: BackgroundTasks,
     sync: bool = False,
@@ -128,6 +146,28 @@ async def get_channel_videos(channel_id: str, limit: int = 50):
         "count": len(rows),
         "statistics": db.get_statistics(channel_id),
     }
+
+
+@router.get("/channel/{channel_id}/analytics")
+async def channel_analytics(channel_id: str):
+    """Advanced analytics for a channel.
+
+    See `youtube_analytics.analytics.compute_channel_analytics` for the
+    full schema. Computes cadence, publish pattern, engagement-vs-views
+    correlation, title-length impact, health score, decay exponent,
+    earnings cone, and composite ranking.
+    """
+    db = get_db()
+    channel = db.get_channel(channel_id)
+    if channel is None:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    videos = db.get_channel_videos(channel_id)
+    rpm = db.get_channel_rpm(channel_id)
+    try:
+        subscribers = int(channel.get("subscribers") or 0)
+    except (ValueError, TypeError):
+        subscribers = 0
+    return compute_channel_analytics(videos, rpm, subscribers=subscribers)
 
 
 @router.delete("/channel/{channel_id}")
