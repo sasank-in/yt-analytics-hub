@@ -5,6 +5,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
+from youtube_analytics.video_analytics import compute_video_analytics
+
 from .deps import get_db, get_fetcher
 from .pagination import page_params, paginate
 from .rate_limit import LIMITS, limiter
@@ -42,6 +44,23 @@ async def get_video_details(video_id: str):
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
     return video
+
+
+@router.get("/video/{video_id}/analytics")
+async def video_analytics(video_id: str):
+    """Per-video analytics: rates, percentile vs channel, verdict, insights.
+
+    See `youtube_analytics.video_analytics.compute_video_analytics` for the
+    full schema.
+    """
+    db = get_db()
+    video = db.get_video(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    channel_id = video.get("channel_id")
+    channel_videos = db.get_channel_videos(channel_id) if channel_id else []
+    rpm = db.get_channel_rpm(channel_id) if channel_id else None
+    return compute_video_analytics(video, channel_videos, rpm)
 
 
 @router.get("/videos")

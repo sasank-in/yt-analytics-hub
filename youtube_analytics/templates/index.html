@@ -443,26 +443,40 @@
                         </div>
                     </div>
 
+                    <!-- KPI strip + Verdict badge -->
                     <div id="video-stats-section" class="hidden">
-                        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-                            <div class="kpi-card"><p class="kpi-label">Views</p><p class="kpi-value" id="video-views">-</p></div>
-                            <div class="kpi-card"><p class="kpi-label">Likes</p><p class="kpi-value" id="video-likes">-</p></div>
-                            <div class="kpi-card"><p class="kpi-label">Comments</p><p class="kpi-value" id="video-comments">-</p></div>
-                            <div class="kpi-card"><p class="kpi-label">Engagement</p><p class="kpi-value" id="video-engagement">-</p></div>
+                        <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
+                            <div class="kpi-card">
+                                <p class="kpi-label">Verdict</p>
+                                <p class="kpi-value" id="va-verdict-label">–</p>
+                                <p class="kpi-sub"><span id="va-verdict-score">–</span>/100 within channel</p>
+                            </div>
+                            <div class="kpi-card"><p class="kpi-label">Views</p><p class="kpi-value" id="video-views">-</p><p class="kpi-sub" id="va-views-per-day">— /day</p></div>
+                            <div class="kpi-card"><p class="kpi-label">Likes</p><p class="kpi-value" id="video-likes">-</p><p class="kpi-sub" id="va-like-rate">— %</p></div>
+                            <div class="kpi-card"><p class="kpi-label">Comments</p><p class="kpi-value" id="video-comments">-</p><p class="kpi-sub" id="va-comment-rate">— %</p></div>
+                            <div class="kpi-card"><p class="kpi-label">Engagement</p><p class="kpi-value" id="video-engagement">-</p><p class="kpi-sub" id="va-age">— days old</p></div>
                         </div>
                     </div>
 
-                    <div id="video-advanced-charts-section" class="hidden grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-                        <div class="panel"><div class="panel-header"><h3 class="panel-title">Engagement Composition</h3></div><div class="panel-body"><div class="chart-container"><canvas id="video-composition-canvas"></canvas></div></div></div>
-                        <div class="panel"><div class="panel-header"><h3 class="panel-title">Benchmark vs Channel Siblings</h3></div><div class="panel-body"><div class="chart-container"><canvas id="video-benchmark-canvas"></canvas></div></div></div>
+                    <!-- Key insights (plain-language conclusions) -->
+                    <div id="video-insights-panel" class="panel mb-4 border-l-4 border-brand-500 hidden">
+                        <div class="panel-header"><h3 class="panel-title">Key insights</h3></div>
+                        <div class="panel-body">
+                            <ul id="va-insights" class="space-y-2 text-sm text-slate-700"></ul>
+                        </div>
                     </div>
 
-                    <div id="video-insights-charts-section" class="hidden grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-                        <div class="panel"><div class="panel-header"><h3 class="panel-title">Engagement Rate Breakdown</h3></div><div class="panel-body"><div class="chart-container"><canvas id="video-engagement-rate-canvas"></canvas></div></div></div>
-                        <div class="panel"><div class="panel-header"><h3 class="panel-title">Engagement Efficiency</h3></div><div class="panel-body"><div class="chart-container"><canvas id="video-percentile-canvas"></canvas></div></div></div>
+                    <!-- Percentile bars (vs channel siblings) -->
+                    <div id="video-percentile-panel" class="panel mb-4 hidden">
+                        <div class="panel-header flex items-center justify-between">
+                            <h3 class="panel-title">Where this video ranks within the channel</h3>
+                            <span class="text-xs text-slate-500" id="va-siblings-count">— siblings</span>
+                        </div>
+                        <div class="panel-body space-y-3" id="va-percentile-bars"></div>
                     </div>
 
-                    <div id="video-trend-charts-section" class="hidden grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <!-- Charts row: trend + velocity -->
+                    <div id="video-trend-charts-section" class="hidden grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
                         <div class="panel"><div class="panel-header"><h3 class="panel-title">This Video vs Channel</h3></div><div class="panel-body"><div class="chart-container"><canvas id="video-channel-trend-canvas"></canvas></div></div></div>
                         <div class="panel">
                             <div class="panel-header flex items-center justify-between">
@@ -474,6 +488,29 @@
                             </div>
                             <div class="panel-body"><div class="chart-container"><canvas id="video-velocity-canvas"></canvas></div></div>
                         </div>
+                    </div>
+
+                    <!-- Earnings cone -->
+                    <div id="video-earnings-panel" class="panel mb-4 hidden">
+                        <div class="panel-header"><h3 class="panel-title">Lifetime earnings estimate</h3></div>
+                        <div class="panel-body">
+                            <div class="aa-earnings-row">
+                                <span class="aa-earnings-low">$<span id="va-earnings-low">–</span></span>
+                                <span class="aa-earnings-mid">$<span id="va-earnings-mid">–</span></span>
+                                <span class="aa-earnings-high">$<span id="va-earnings-high">–</span></span>
+                            </div>
+                            <div class="aa-earnings-bar"><div class="aa-earnings-fill"></div></div>
+                            <p class="text-xs text-slate-500 mt-2">
+                                Low / mid / high at RPM $<span id="va-earnings-rpm">–</span>
+                                · <span id="va-earnings-per-day">–</span>/day going forward.
+                                ±30% band reflects real-world RPM variability.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Benchmark chart (kept — it's actually useful) -->
+                    <div id="video-advanced-charts-section" class="hidden mb-4">
+                        <div class="panel"><div class="panel-header"><h3 class="panel-title">Benchmark vs Channel Siblings</h3></div><div class="panel-body"><div class="chart-container"><canvas id="video-benchmark-canvas"></canvas></div></div></div>
                     </div>
                 </section>
 
@@ -546,6 +583,7 @@
 <script src="/static/js/channel-charts.js"></script>
 <script src="/static/js/video-charts.js"></script>
 <script src="/static/js/advanced-analytics.js"></script>
+<script src="/static/js/video-advanced-analytics.js"></script>
 <script src="/static/js/ui-enhancements.js"></script>
 </body>
 </html>

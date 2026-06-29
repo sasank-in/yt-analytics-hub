@@ -68,6 +68,30 @@ block to the analytics response, computed server-side.
       thresholds (≥ 3× channel median views AND engagement above channel
       median).
 
+## ✅ Done in v3 (chronological fetch)
+
+- [x] **D1** New `get_channel_recent_videos()` on the fetcher — uses
+      `playlistItems.list` (1 quota unit / 50 videos vs 100 for search.list).
+      Returns newest-first chronological order so cadence + decay see real
+      time-series.
+- [x] **D2** `VIDEO_FETCH_STRATEGY` env var defaults to `"recent"`. Set to
+      `"top"` if you specifically want the channel's all-time hits.
+- [x] **D3** Background task respects the strategy. Re-fetch all channels
+      to pick up the new sample.
+
+Effect on live data (after re-fetch):
+
+| Channel | Cadence before | Cadence after | Decay R² before → after |
+|---|---|---|---|
+| 3Blue1Brown | 42d (wrong) | **6.89d** (correct weekly) | 0.00 → 0.07 |
+| HuggingFace | 1d | 1.58d | 0.01 → 0.00 |
+| Roboflow | 14d | 6.96d | 0.00 → **0.16** (signal!) |
+| Unq Gamer | (broken) | 0.37d | (no signal) → **0.10** moderate |
+
+Roboflow now gets `"Strong long-tail (b=+0.58, R²=0.16): older videos
+accumulate ~300% more views per decade of age."` — a concrete, defensible
+claim.
+
 ## Calibration
 
 - [ ] **C1** Health-score weights are wrong. With 5% engagement as full

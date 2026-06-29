@@ -58,6 +58,94 @@ class YouTubeFetcher:
         except Exception as e:
             return {"error": _humanize_error(e)}
 
+    def get_channel_recent_videos(self, channel_id, max_results=50, return_debug=False):
+        """Fetch the channel's N most recent uploads in chronological order.
+
+        Uses `playlistItems.list` on the uploads playlist (1 quota unit per
+        page of 50) instead of `search.list` ordered by view count
+        (100 quota units per page). The result is reverse-chronological —
+        newest first — which is what `cadence`, `decay_model`, and
+        `best_slot` actually need to produce meaningful numbers.
+
+        Compared to `get_channel_top_videos`, this:
+          - costs ~100× less quota
+          - gives an honest time-series of uploads
+          - misses very old viral hits unless `max_results` is large
+        """
+        debug = {
+            "channel_id": channel_id,
+            "max_results": max_results,
+            "source": "playlistItems",
+            "pages": 0,
+            "api_errors": [],
+        }
+        try:
+            channel_request = self.youtube.channels().list(
+                part="contentDetails", id=channel_id,
+            )
+            channel_response = channel_request.execute()
+            if not channel_response.get("items"):
+                err = {"error": "Channel not found"}
+                return {**err, "debug": debug} if return_debug else err
+
+            uploads = channel_response["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
+
+            videos = []
+            next_page_token = None
+            while len(videos) < max_results:
+                page_size = min(50, max_results - len(videos))
+                playlist_request = self.youtube.playlistItems().list(
+                    part="snippet",
+                    playlistId=uploads,
+                    maxResults=page_size,
+                    pageToken=next_page_token,
+                )
+                playlist_response = playlist_request.execute()
+                debug["pages"] += 1
+
+                items = playlist_response.get("items", [])
+                if not items:
+                    break
+
+                # Defensive: the API normally honours maxResults, but slice
+                # locally so we never overshoot `max_results` (also makes
+                # mock-driven tests deterministic).
+                remaining = max_results - len(videos)
+                items = items[:remaining]
+
+                video_ids = [
+                    item["snippet"]["resourceId"]["videoId"]
+                    for item in items
+                    if item.get("snippet", {}).get("resourceId", {}).get("videoId")
+                ]
+
+                if video_ids:
+                    videos_request = self.youtube.videos().list(
+                        part="snippet,statistics,contentDetails",
+                        id=",".join(video_ids),
+                    )
+                    videos_response = videos_request.execute()
+                    # Preserve playlist order (newest first) — videos.list
+                    # may return them in a different order, so we re-sort.
+                    parsed_by_id = {}
+                    for video in videos_response.get("items", []):
+                        parsed = self._parse_video_response({"items": [video]})
+                        if "error" not in parsed:
+                            parsed_by_id[parsed["video_id"]] = parsed
+                    for vid in video_ids:
+                        if vid in parsed_by_id:
+                            videos.append(parsed_by_id[vid])
+
+                next_page_token = playlist_response.get("nextPageToken")
+                if not next_page_token:
+                    break
+
+            debug["video_ids"] = len(videos)
+            return {"videos": videos, "debug": debug} if return_debug else videos
+        except Exception as e:
+            msg = _humanize_error(e)
+            return {"error": msg, "debug": debug} if return_debug else {"error": msg}
+
     def get_channel_videos(self, channel_id, max_results=None):
         """Fetch videos from a channel. If max_results is None, fetch all."""
         try:

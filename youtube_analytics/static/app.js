@@ -171,8 +171,10 @@ async function loadDashboard() {
         // Populate quick select box with channels
         populateQuickChannelSelect(allChannels);
 
-        drawDashboardCharts(allChannels);
-        updateDashboardHighlights(allChannels);
+        // Each block wrapped so a chart-rendering failure (e.g. invalid canvas)
+        // doesn't prevent the highlight KPIs from being populated.
+        try { drawDashboardCharts(allChannels); } catch (e) { console.warn('drawDashboardCharts failed:', e.message); }
+        try { updateDashboardHighlights(allChannels); } catch (e) { console.warn('updateDashboardHighlights failed:', e.message); }
         
     } catch (error) {
         console.error('Dashboard load error:', error);
@@ -1223,10 +1225,10 @@ async function loadVideoFromDbOnly(videoId) {
 
 function displayVideoAnalytics(video) {
     currentVideoAnalytics = video;
+    // Show the new panels
     document.getElementById('video-stats-section').classList.remove('hidden');
-    document.getElementById('video-advanced-charts-section').classList.remove('hidden');
-    document.getElementById('video-insights-charts-section').classList.remove('hidden');
     document.getElementById('video-trend-charts-section').classList.remove('hidden');
+    document.getElementById('video-advanced-charts-section').classList.remove('hidden');
 
     const views = toNumber(video.views);
     const likes = toNumber(video.likes);
@@ -1253,17 +1255,19 @@ function displayVideoAnalytics(video) {
         </div>
     `;
 
-    // Draw the 6 video-detail charts. Chart helpers handle null canvases gracefully.
+    // Charts that survived the v2 honesty pass.
     const data = { likes, comments, views, video_id: video.video_id };
     const drawSafe = (fn, ...args) => {
         try { fn(...args); } catch (e) { console.warn('Chart draw failed:', e.message); }
     };
-    drawSafe(window.VideoCharts.drawVideoCompositionChart, document.getElementById('video-composition-canvas'), data);
     drawSafe(window.VideoCharts.drawVideoBenchmarkChart, document.getElementById('video-benchmark-canvas'), data, currentChannelVideos);
-    drawSafe(window.VideoCharts.drawVideoEngagementRateChart, document.getElementById('video-engagement-rate-canvas'), data);
-    drawSafe(window.VideoCharts.drawVideoPercentileChart, document.getElementById('video-percentile-canvas'), data);
     drawSafe(window.VideoCharts.drawVideoChannelTrendChart, document.getElementById('video-channel-trend-canvas'), video, currentChannelVideos);
     drawSafe(window.VideoCharts.drawVideoVelocityChart, document.getElementById('video-velocity-canvas'), video);
+
+    // Fire-and-forget: pull the advanced video analytics + render the new panels.
+    if (window.VideoAdvancedAnalytics && video.video_id) {
+        window.VideoAdvancedAnalytics.render(video.video_id);
+    }
 }
 
 function applyChartTheme() {

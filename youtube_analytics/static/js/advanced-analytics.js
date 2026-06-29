@@ -40,20 +40,30 @@
         if (!container || !channelId) return;
         container.classList.remove('hidden');
 
+        let data;
         try {
-            const data = await window.fetchAPI(`/channel/${channelId}/analytics`);
-            renderInsights(data.insights);
-            renderHealthScore(data.health_score, data.sample_size);
-            renderCadence(data.cadence);
-            renderHeatmap(data.publish_pattern, data.best_slot);
-            renderEngagementCorrelation(data.engagement_vs_views);
-            renderTitleLength(data.title_length);
-            renderDecay(data.decay);
-            renderEarningsCone(data.earnings_cone);
-            renderComposite(data.composite_ranking);
+            data = await window.fetchAPI(`/channel/${channelId}/analytics`);
         } catch (e) {
-            container.innerHTML = `<p class="placeholder">Couldn't load advanced analytics: ${e.message}</p>`;
+            console.warn('AdvancedAnalytics fetch failed:', e.message);
+            return;
         }
+
+        // Each renderer is wrapped so one failure doesn't wipe the panel.
+        // Previously the catch clobbered container.innerHTML, blowing away
+        // the very elements the renderers need on the next call.
+        const safe = (label, fn) => {
+            try { fn(); }
+            catch (e) { console.warn(`AdvancedAnalytics.${label} failed:`, e.message); }
+        };
+        safe('insights',     () => renderInsights(data.insights));
+        safe('health',       () => renderHealthScore(data.health_score, data.sample_size));
+        safe('cadence',      () => renderCadence(data.cadence));
+        safe('heatmap',      () => renderHeatmap(data.publish_pattern, data.best_slot));
+        safe('correlation',  () => renderEngagementCorrelation(data.engagement_vs_views));
+        safe('title_length', () => renderTitleLength(data.title_length));
+        safe('decay',        () => renderDecay(data.decay));
+        safe('earnings',     () => renderEarningsCone(data.earnings_cone));
+        safe('composite',    () => renderComposite(data.composite_ranking));
     }
 
     // ---------------------------------------------------------------------

@@ -118,7 +118,12 @@ async def fetch_channel_videos_endpoint(
         result = fetch_channel_videos(channel_id, debug=debug)
         if result.get("error"):
             raise HTTPException(status_code=502, detail=result["error"])
-        response = {"message": "Fetch complete", "channel_id": channel_id, "saved": result.get("saved", 0)}
+        response = {
+            "message": "Fetch complete",
+            "channel_id": channel_id,
+            "saved": result.get("saved", 0),
+            "strategy": result.get("strategy"),
+        }
         if debug:
             response["debug"] = result.get("debug")
         return response

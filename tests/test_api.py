@@ -125,6 +125,25 @@ def test_rpm_put_persists_value(app_client, fake_fetcher, sample_channel):
     assert get.json()["rpm"] == 4.25
 
 
+def test_video_analytics_returns_404_when_missing(app_client):
+    assert app_client.get("/api/video/no_such_video/analytics").status_code == 404
+
+
+def test_video_analytics_returns_full_envelope(app_client, fake_fetcher, sample_video):
+    fake_fetcher.get_video_by_id.return_value = sample_video
+    app_client.get(f"/api/video/search?q={sample_video['video_id']}")
+
+    r = app_client.get(f"/api/video/{sample_video['video_id']}/analytics")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body.keys()) == {
+        "video_id", "title", "age_days", "rates",
+        "vs_channel", "verdict", "earnings", "insights",
+    }
+    assert body["video_id"] == sample_video["video_id"]
+    assert isinstance(body["insights"], list)
+
+
 def test_channel_analytics_returns_404_when_missing(app_client):
     assert app_client.get("/api/channel/UCnope/analytics").status_code == 404
 

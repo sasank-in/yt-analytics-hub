@@ -37,5 +37,12 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 # Analytics Settings
 TOP_VIDEOS_LIMIT = int(os.getenv("TOP_VIDEOS_LIMIT", "50"))
 
+# Fetch strategy for channel videos.
+#   "recent" (default) → chronological newest-first via playlistItems.list
+#                         (~1 quota unit per 50 videos; honest for cadence/decay)
+#   "top"              → most-viewed via search.list
+#                         (~100 quota units per 50 videos; biases analytics)
+VIDEO_FETCH_STRATEGY = os.getenv("VIDEO_FETCH_STRATEGY", "recent").strip().lower()
+
 # Database Debug Mode
 DB_ECHO = os.getenv("DB_ECHO", "False").lower() == "true"  # Logs SQL queries if True
