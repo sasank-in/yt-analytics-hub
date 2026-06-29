@@ -191,16 +191,21 @@ def test_decay_model_too_few_points():
 
 
 def test_decay_model_runs_on_realistic_input():
+    # Synthesise a realistic YouTube power-law: views ∝ age^0.3
+    # (typical real channels see exponents between 0.1 and 0.6, with the
+    # remainder of variance coming from per-video popularity).
     videos = []
     for i, age_days in enumerate([10, 30, 100, 365, 730, 1095]):
         published = (datetime.now(timezone.utc) - timedelta(days=age_days)).isoformat()
-        # Older videos have more cumulative views — typical YouTube pattern
-        videos.append(_video(video_id=f"v{i}", views=str(1000 * age_days), published_at=published))
+        views = int(1000 * (age_days ** 0.3))
+        videos.append(_video(video_id=f"v{i}", views=str(views), published_at=published))
     out = decay_model(videos)
     assert out["exponent"] is not None
     assert out["n"] == 6
-    # Older = more views, so slope on log–log should be positive in this synthetic data
-    assert out["r_squared"] >= 0.0
+    # Slope should be in the realistic range and reasonably close to 0.3
+    assert 0.2 <= out["exponent"] <= 0.4
+    # And the fit should be near-perfect on noise-free synthetic data
+    assert out["r_squared"] >= 0.9
 
 
 # ---------------------- earnings_cone -----------------------------------
